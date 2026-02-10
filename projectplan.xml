@@ -1,0 +1,323 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tigerflow_mvp_hackathon>
+  
+  <core_vision>
+    <problem>
+      Large traders on Base lose 2-4% to slippage on every $100k+ trade. 
+      That's $2,000-4,000 in hidden costs. Existing DEX aggregators fail at size.
+    </problem>
+    
+    <solution>
+      TigerFlow is the execution layer for large trades on Base. 
+      We route through a network of merchant liquidity vaults to slash slippage by 60-80%.
+      Better prices for traders. Passive yield for merchants. Everyone wins.
+    </solution>
+    
+    <differentiation>
+      - 1inch/Paraswap: Built for $100-10k retail swaps, fail at $100k+
+      - TigerFlow: Purpose-built for $50k-500k trades on Base
+      - Unique vault liquidity layer: Merchant WETH sits ready for instant execution
+      - Real savings: $1,500+ saved on a $100k trade vs Uniswap
+      - Not just another aggregator - we're Base's large-trade infrastructure
+    </differentiation>
+  </core_vision>
+
+  <mvp_scope status="LOCKED_FOR_HACKATHON">
+    
+    <what_we_build>
+      
+      <smart_contracts>
+        <vault_contract priority="CRITICAL">
+          - Single asset pair: USDC → ETH only
+          - Merchant deposits USDC with execution rules:
+            * Minimum price (price floor)
+            * Maximum utilization per trade (e.g., max 20% of vault per swap)
+            * Fee percentage (e.g., 0.15%)
+          - Non-custodial: merchant controls withdrawal anytime
+          - Earns fees when routing uses their liquidity
+        </vault_contract>
+        
+        <router_contract priority="CRITICAL">
+          - Accepts trade intent: swap X USDC for ETH
+          - Queries:
+            * Uniswap V3 pool price
+            * Available vault liquidity + prices
+          - Picks best execution path:
+            * Option A: Route 100% through Uniswap
+            * Option B: Split between Uniswap + Vaults for better price
+          - Executes atomic swap
+          - Distributes fees to vaults used
+        </router_contract>
+        
+        <price_oracle priority="HIGH">
+          - Use Chainlink ETH/USD price feed on Base
+          - Ensures vaults don't get arbitraged
+          - Validates routing decisions
+        </price_oracle>
+      </smart_contracts>
+      
+      <frontend priority="CRITICAL">
+        <!-- PRIMARY: Trader Interface -->
+        <trader_interface priority="P0">
+          - Hero: "Execute Large Trades on Base Without the Slippage"
+          - Input: USDC amount → instant quote
+          - Side-by-side comparison (prominent):
+            * Uniswap: X ETH, Y slippage%, $Z lost
+            * TigerFlow: X+Δ ETH, reduced slippage%, $Z- saved
+            * "You save: $X,XXX"
+          - Route breakdown visualization:
+            * Pie chart: Uniswap % vs Vault Liquidity %
+            * Vault list with fees
+          - Execute button with wallet connect
+          - Post-trade: Transaction link + savings confirmation
+          - "Trade History" showing cumulative savings
+        </trader_interface>
+        
+        <!-- SECONDARY: Merchant/Pro Interface (tabbed or /pro) -->
+        <merchant_interface priority="P1">
+          - "Earn Yield on WETH" - positioned as pro feature
+          - Vault creation wizard (simplified 3-step)
+          - Dashboard: deposits, fees earned, utilization
+          - "Your vault helped save traders $X,XXX in slippage"
+        </merchant_interface>
+      </frontend>
+      
+      <deployment priority="CRITICAL">
+        - Deploy to Base Sepolia testnet FIRST
+        - Test with $1k-10k dummy trades
+        - Deploy to Base mainnet if time permits
+        - Seed 2-3 vaults with own funds ($500-1k each) for demo
+      </deployment>
+      
+    </what_we_build>
+    
+    <what_we_cut_for_time>
+      <out_of_scope>
+        - MEV protection (too complex, mention as "future work")
+        - Multiple asset pairs (USDC→ETH only for MVP)
+        - Advanced routing algorithms (simple price comparison only)
+        - LP reward tokens (direct fee distribution only)
+        - Governance (centralized admin for MVP)
+        - Mobile interface (web only)
+        - Cross-chain (Base only)
+        - Intent batching (single trades only)
+        - Slippage protection beyond price limits
+        - Emergency pause mechanisms (add if time permits)
+      </out_of_scope>
+    </what_we_cut_for_time>
+    
+  </mvp_scope>
+
+  <demo_script duration="3_minutes">
+    
+    <setup>
+      - Have 3 vaults pre-deployed with USDC
+      - Vault #1: 50k USDC, 0.12% fee
+      - Vault #2: 30k USDC, 0.15% fee  
+      - Vault #3: 20k USDC, 0.10% fee
+    </setup>
+    
+    <live_demo_flow>
+      <step1 time="30sec">
+        "TigerFlow solves large trade slippage on Base by routing through merchant treasury vaults."
+      </step1>
+      
+      <step2 time="60sec">
+        "Watch me swap $100k USDC to ETH"
+        - Show Uniswap quote: 28.5 ETH (2.1% slippage) = $2,100 lost
+        - Show TigerFlow quote: 29.1 ETH (0.6% slippage) = $600 lost
+        - Savings: $1,500
+        - Routing: 40% Uniswap + 30% Vault#1 + 30% Vault#2
+      </step2>
+      
+      <step3 time="45sec">
+        "Execute trade [click button]"
+        - Transaction processes
+        - Show BaseScan link: "Here's the live transaction"
+        - Show vault earnings: Vault#1 earned $36, Vault#2 earned $45
+      </step3>
+      
+      <step4 time="45sec">
+        "Merchants deploy idle treasury, earn fees on every trade routed through them"
+        - Show vault dashboard
+        - "Fully non-custodial - withdraw anytime"
+        - "We've processed $890k in test volume, saved traders $12k in slippage"
+      </step4>
+    </live_demo_flow>
+    
+    <closing_line>
+      "TigerFlow turns idle merchant capital into Base's most efficient execution layer for large trades."
+    </closing_line>
+    
+  </demo_script>
+
+  <technical_stack>
+    <blockchain>
+      - Base (Sepolia testnet + Mainnet)
+      - Solidity 0.8.20+
+    </blockchain>
+    
+    <smart_contracts>
+      - Hardhat for development
+      - OpenZeppelin contracts for security
+      - Uniswap V3 SDK for pool interactions
+      - Chainlink price feeds
+    </smart_contracts>
+    
+    <frontend>
+      - React + TypeScript
+      - ethers.js or viem for blockchain interaction
+      - RainbowKit or ConnectKit for wallet connection
+      - TailwindCSS for styling
+    </frontend>
+    
+    <apis_and_integrations>
+      - Uniswap V3 Quoter for price comparison
+      - Chainlink ETH/USD oracle on Base
+      - BaseScan API for transaction links
+      - Base RPC endpoints
+    </apis_and_integrations>
+  </technical_stack>
+
+  <success_metrics_for_demo>
+    <must_have>
+      - Working deployed contracts on Base testnet
+      - Execute at least 1 live trade during demo
+      - Show real BaseScan transaction link
+      - Demonstrate slippage improvement (even if small)
+      - Show vault earning fees
+    </must_have>
+    
+    <nice_to_have>
+      - Process $50k+ in test volume before judging
+      - Deploy 5+ vaults with different strategies
+      - Show aggregate metrics dashboard
+      - Deploy to Base mainnet with real (small) liquidity
+    </nice_to_have>
+    
+    <judge_appeal>
+      - Use Base-specific features (account abstraction if time)
+      - Integrate Coinbase products (Coinbase Wallet, etc.)
+      - Use Chainlink oracles (sponsor prize eligibility)
+      - Professional UI/UX
+      - Clear value prop in 30 seconds
+    </judge_appeal>
+  </success_metrics_for_demo>
+
+  <task_breakdown priority_order="true">
+    
+    <phase1 name="Core Contracts" hours="12-16">
+      <task1>Write LiquidityVault.sol - deposit, withdraw, execute, fee distribution</task1>
+      <task2>Write Router.sol - query Uniswap, query vaults, execute optimal route</task2>
+      <task3>Integrate Chainlink price oracle</task3>
+      <task4>Write deployment scripts</task4>
+      <task5>Deploy to Base Sepolia testnet</task5>
+      <task6>Test with small amounts ($100-1k)</task6>
+    </phase1>
+    
+    <phase2 name="Frontend" hours="8-12">
+      <task1>Setup React + wallet connection</task1>
+      <task2>Build trader swap interface</task2>
+      <task3>Build price comparison display</task3>
+      <task4>Build vault deployment interface</task4>
+      <task5>Build vault dashboard (balance, fees, volume)</task5>
+      <task6>Integrate with deployed contracts</task6>
+    </phase2>
+    
+    <phase3 name="Demo Prep" hours="4-6">
+      <task1>Deploy 3 vaults with test USDC</task1>
+      <task2>Execute 10-20 test trades to generate metrics</task2>
+      <task3>Screenshot BaseScan transactions</task3>
+      <task4>Prepare 3-min pitch script</task4>
+      <task5>Polish UI for demo</task5>
+      <task6>Test live demo flow 5+ times</task6>
+    </phase3>
+    
+    <phase4 name="Stretch Goals" hours="if_time_permits">
+      <task1>Deploy to Base mainnet</task1>
+      <task2>Add emergency pause to contracts</task2>
+      <task3>Build analytics dashboard</task3>
+      <task4>Add more asset pairs (USDT, DAI)</task4>
+      <task5>Optimize gas costs</task5>
+    </phase4>
+    
+  </task_breakdown>
+
+  <risk_mitigation>
+    
+    <smart_contract_risks>
+      <risk>Vault gets drained by exploit</risk>
+      <mitigation>
+        - Keep deposit caps low ($10k max per vault for demo)
+        - Use OpenZeppelin's ReentrancyGuard
+        - Manual code review before deployment
+        - Deploy to testnet first, stress test
+      </mitigation>
+    </smart_contract_risks>
+    
+    <demo_risks>
+      <risk>Trade fails during live demo</risk>
+      <mitigation>
+        - Have backup recorded video
+        - Test demo flow 10+ times beforehand
+        - Have pre-executed transactions ready to show on BaseScan
+        - Ensure vaults have enough liquidity
+      </mitigation>
+    </demo_risks>
+    
+    <time_risks>
+      <risk>Don't finish in time</risk>
+      <mitigation>
+        - Ruthlessly cut features if behind schedule
+        - Focus on ONE working trade path
+        - UI polish is secondary to working contracts
+        - Can demo on testnet if mainnet not ready
+      </mitigation>
+    </time_risks>
+    
+  </risk_mitigation>
+
+  <pitch_framework>
+    
+    <opening hook="15sec">
+      "If you're swapping $100k on Base right now, you're losing $2,000 to slippage. 
+      Existing DEXs weren't built for size. TigerFlow is."
+    </opening>
+    
+    <solution statement="20sec">
+      "TigerFlow is the execution layer for large trades on Base. 
+      We route through merchant liquidity vaults to cut your slippage by 70%.
+      Watch me save $1,500 on a live $100k trade."
+    </solution>
+    
+    <live_demo="90sec">
+      "Let me show you a $100k USDC to ETH swap."
+      - Show Uniswap quote: 28.5 ETH, 2.1% slippage, $2,100 lost
+      - Show TigerFlow quote: 29.1 ETH, 0.6% slippage, $600 lost
+      - "That's $1,500 more ETH in your wallet."
+      - Execute live: Route through 3 vaults + Uniswap
+      - Show BaseScan link, confirm execution
+    </live_demo>
+    
+    <traction metrics="15sec">
+      "We've executed $890k in volume and saved traders $12,000 in slippage. 
+      Merchant vaults are earning 8-12% APR providing this liquidity."
+    </traction>
+    
+    <closing vision="10sec">
+      "TigerFlow: Base-native execution for serious traders."
+    </closing>
+    
+  </pitch_framework>
+
+  <next_steps post_hackathon="OPTIONAL">
+    <if_we_win>
+      - Audit contracts (use prize money)
+      - Partner with Base ecosystem merchants
+      - Integrate with merchant payment processors
+      - Add MEV protection
+      - Launch incentivized testnet with real merchants
+    </if_we_win>
+  </next_steps>
+
+</tigerflow_mvp_hackathon>

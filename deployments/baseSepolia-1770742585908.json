@@ -1,0 +1,35 @@
+{
+  "network": "baseSepolia",
+  "chainId": "84532",
+  "timestamp": "2026-02-10T16:56:25.907Z",
+  "contracts": {
+    "oracle": "0x460b023a87f7Dbe0114357Ab45830F1A41e9C103",
+    "router": "0x398506f0E0e18647d3A0e574c94752DdC44f5060",
+    "vaults": [
+      {
+        "address": "0xd0CB44B07e922d3bc276061bCB9eF41e103Cc872",
+        "name": "Tiger Vault Alpha",
+        "feeBps": 12,
+        "maxUtilBps": 2500
+      },
+      {
+        "address": "0x964d800A7Bf5353084fE6360D22390ABec46f11F",
+        "name": "Tiger Vault Beta",
+        "feeBps": 15,
+        "maxUtilBps": 2000
+      },
+      {
+        "address": "0xdDb014C771236CD62e1F3eD6cC9459163960bBDA",
+        "name": "Tiger Vault Gamma",
+        "feeBps": 10,
+        "maxUtilBps": 3000
+      }
+    ]
+  },
+  "external": {
+    "usdc": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+    "weth": "0x4200000000000000000000000000000000000006",
+    "chainlinkEthUsd": "0x4aDC67696bA383F43DD60A9e78F2C97Fbbfc7cb1",
+    "uniswapRouter": "0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4"
+  }
+}
