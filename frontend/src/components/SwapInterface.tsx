@@ -4,9 +4,11 @@ import { formatUnits, parseUnits } from 'viem';
 import { TIGER_FLOW_ROUTER_ABI } from '../abis/TigerFlowRouter';
 import { ERC20_ABI } from '../abis/ERC20';
 import { ADDRESSES } from '../abis/addresses';
-import { ChevronDown, ArrowDown, Settings, Check, X } from 'lucide-react';
+import { ChevronDown, ArrowDown, Settings, Check, X, History, Loader2, RefreshCw } from 'lucide-react';
+import { useTransactions } from '../hooks/useTransactions';
+import { TransactionHistory } from './TransactionHistory';
 
-// Spotlight hook for mouse tracking
+// Spotlight hook
 function useSpotlight(ref: React.RefObject<HTMLElement>) {
   const handleMouseMove = useCallback((e: MouseEvent) => {
     if (!ref.current) return;
@@ -31,13 +33,17 @@ export function SwapInterface() {
   const [isApproving, setIsApproving] = useState(false);
   const [isSwapping, setIsSwapping] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
   const [slippage, setSlippage] = useState('1.0');
   const [deadline, setDeadline] = useState('20');
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
+  const { transactions, addTransaction, updateTransaction, clearHistory } = useTransactions(address);
   const cardRef = useRef<HTMLDivElement>(null);
   useSpotlight(cardRef);
 
-  const { data: usdcBalance } = useReadContract({
+  // Read balances and allowances
+  const { data: usdcBalance, refetch: refetchUsdcBalance } = useReadContract({
     address: ADDRESSES.tokens.usdc,
     abi: ERC20_ABI,
     functionName: 'balanceOf',
@@ -51,7 +57,8 @@ export function SwapInterface() {
     args: address ? [address, ADDRESSES.router] : undefined,
   });
 
-  const { data: quoteData } = useReadContract({
+  // Quote with refetch for real-time updates
+  const { data: quoteData, refetch: refetchQuote } = useReadContract({
     address: ADDRESSES.router,
     abi: TIGER_FLOW_ROUTER_ABI,
     functionName: 'getQuote',
@@ -62,25 +69,67 @@ export function SwapInterface() {
 
   const [tigerQuote, uniswapOnlyWeth] = quoteData || [null, 0n];
 
-  const { writeContract: approveUsdc, data: approveHash } = useWriteContract();
-  const { isSuccess: approveSuccess } = useWaitForTransactionReceipt({ hash: approveHash });
+  // Auto-refresh quote every 30 seconds
+  useEffect(() => {
+    if (!usdcAmount || parseFloat(usdcAmount) <= 0) return;
+    
+    const interval = setInterval(() => {
+      refetchQuote();
+      setLastUpdated(new Date());
+    }, 30000);
 
-  const { writeContract: executeSwap, data: swapHash } = useWriteContract();
-  const { isSuccess: swapSuccess } = useWaitForTransactionReceipt({ hash: swapHash });
+    return () => clearInterval(interval);
+  }, [usdcAmount, refetchQuote]);
+
+  // Write contracts
+  const { writeContract: approveUsdc, data: approveHash, error: approveError } = useWriteContract();
+  const { writeContract: executeSwap, data: swapHash, error: swapError } = useWriteContract();
+
+  const { isSuccess: approveSuccess, isError: approveFailed } = useWaitForTransactionReceipt({ hash: approveHash });
+  const { isSuccess: swapSuccess, isError: swapFailed } = useWaitForTransactionReceipt({ hash: swapHash });
+
+  // Handle transaction status updates
+  useEffect(() => {
+    if (approveHash) {
+      if (approveSuccess) {
+        setIsApproving(false);
+        refetchAllowance();
+        updateTransaction(approveHash, { status: 'success' });
+      } else if (approveFailed) {
+        setIsApproving(false);
+        updateTransaction(approveHash, { status: 'failed' });
+      }
+    }
+  }, [approveSuccess, approveFailed, approveHash, refetchAllowance, updateTransaction]);
 
   useEffect(() => {
-    if (approveSuccess) {
+    if (swapHash) {
+      if (swapSuccess) {
+        setIsSwapping(false);
+        setUsdcAmount('');
+        refetchUsdcBalance();
+        updateTransaction(swapHash, { status: 'success' });
+      } else if (swapFailed) {
+        setIsSwapping(false);
+        updateTransaction(swapHash, { status: 'failed' });
+      }
+    }
+  }, [swapSuccess, swapFailed, swapHash, refetchUsdcBalance, updateTransaction]);
+
+  // Handle errors
+  useEffect(() => {
+    if (approveError) {
       setIsApproving(false);
-      refetchAllowance();
+      alert(`Approval failed: ${approveError.message}`);
     }
-  }, [approveSuccess, refetchAllowance]);
+  }, [approveError]);
 
   useEffect(() => {
-    if (swapSuccess) {
+    if (swapError) {
       setIsSwapping(false);
-      setUsdcAmount('');
+      alert(`Swap failed: ${swapError.message}`);
     }
-  }, [swapSuccess]);
+  }, [swapError]);
 
   const needsApproval = () => {
     if (!usdcAmount || !usdcAllowance) return false;
@@ -90,11 +139,23 @@ export function SwapInterface() {
   const handleApprove = () => {
     if (!usdcAmount) return;
     setIsApproving(true);
+    
+    addTransaction({
+      hash: '',
+      type: 'approve',
+      description: `Approve USDC for swapping`,
+      from: address!,
+    });
+
     approveUsdc({
       address: ADDRESSES.tokens.usdc,
       abi: ERC20_ABI,
       functionName: 'approve',
       args: [ADDRESSES.router, parseUnits(usdcAmount, 6)],
+    }, {
+      onSuccess: (hash) => {
+        updateTransaction('', { hash });
+      },
     });
   };
 
@@ -110,11 +171,23 @@ export function SwapInterface() {
       fee: a.fee,
     }));
 
+    addTransaction({
+      hash: '',
+      type: 'swap',
+      description: `Swap ${usdcAmount} USDC for WETH`,
+      from: address!,
+      amount: usdcAmount,
+    });
+
     executeSwap({
       address: ADDRESSES.router,
       abi: TIGER_FLOW_ROUTER_ABI,
       functionName: 'executeSwap',
       args: [parseUnits(usdcAmount, 6), 0n, deadlineMin, allocations, BigInt(parseFloat(slippage) * 100)],
+    }, {
+      onSuccess: (hash) => {
+        updateTransaction('', { hash });
+      },
     });
   };
 
@@ -136,12 +209,32 @@ export function SwapInterface() {
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
           <span style={{ fontWeight: 600, fontSize: '16px' }}>Swap</span>
-          <button 
-            className="icon-btn"
-            onClick={() => setShowSettings(true)}
-          >
-            <Settings size={18} />
-          </button>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button 
+              className="icon-btn"
+              onClick={() => setShowHistory(true)}
+              style={{ position: 'relative' }}
+            >
+              <History size={18} />
+              {transactions.filter(t => t.status === 'pending').length > 0 && (
+                <span style={{
+                  position: 'absolute',
+                  top: '2px',
+                  right: '2px',
+                  width: '8px',
+                  height: '8px',
+                  background: '#ff6b35',
+                  borderRadius: '50%',
+                }} />
+              )}
+            </button>
+            <button 
+              className="icon-btn"
+              onClick={() => setShowSettings(true)}
+            >
+              <Settings size={18} />
+            </button>
+          </div>
         </div>
 
         {/* From */}
@@ -161,6 +254,9 @@ export function SwapInterface() {
                 const val = e.target.value;
                 if (val === '' || /^\d*\.?\d*$/.test(val)) {
                   setUsdcAmount(val);
+                  if (val && parseFloat(val) > 0) {
+                    setTimeout(() => refetchQuote(), 100);
+                  }
                 }
               }}
               className="input"
@@ -193,6 +289,12 @@ export function SwapInterface() {
         <div style={{ background: '#11141a', border: '1px solid #2a333c', borderRadius: '12px', padding: '16px', marginTop: '4px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '14px', color: '#6b7280' }}>
             <span>Buy</span>
+            {lastUpdated && (
+              <span style={{ fontSize: '11px', color: '#6b7280', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <RefreshCw size={10} />
+                Updated {lastUpdated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+              </span>
+            )}
           </div>
           
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -288,6 +390,7 @@ export function SwapInterface() {
               disabled={isApproving}
               className="btn-primary"
             >
+              {isApproving ? <Loader2 size={16} style={{ animation: 'spin 1s linear infinite', display: 'inline', marginRight: '8px' }} /> : null}
               {isApproving ? 'Approving...' : 'Approve USDC'}
             </button>
           ) : (
@@ -296,36 +399,11 @@ export function SwapInterface() {
               disabled={!tigerQuote || isSwapping || !usdcAmount || parseFloat(usdcAmount) <= 0}
               className="btn-primary"
             >
+              {isSwapping ? <Loader2 size={16} style={{ animation: 'spin 1s linear infinite', display: 'inline', marginRight: '8px' }} /> : null}
               {isSwapping ? 'Swapping...' : 'Swap'}
             </button>
           )}
         </div>
-
-        {/* Links */}
-        {(approveHash || swapHash) && (
-          <div style={{ marginTop: '12px', textAlign: 'center' }}>
-            {approveHash && (
-              <a 
-                href={`https://sepolia.basescan.org/tx/${approveHash}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ fontSize: '14px', color: '#ff6b35', textDecoration: 'none' }}
-              >
-                View approval →
-              </a>
-            )}
-            {swapHash && (
-              <a 
-                href={`https://sepolia.basescan.org/tx/${swapHash}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ fontSize: '14px', color: '#10b981', textDecoration: 'none' }}
-              >
-                View swap →
-              </a>
-            )}
-          </div>
-        )}
       </div>
 
       {/* Settings Modal */}
@@ -359,18 +437,13 @@ export function SwapInterface() {
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Modal Header */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
               <span style={{ fontWeight: 600, fontSize: '16px' }}>Settings</span>
-              <button 
-                className="icon-btn"
-                onClick={() => setShowSettings(false)}
-              >
+              <button className="icon-btn" onClick={() => setShowSettings(false)}>
                 <X size={18} />
               </button>
             </div>
 
-            {/* Slippage */}
             <div style={{ marginBottom: '20px' }}>
               <label style={{ display: 'block', fontSize: '14px', color: '#9ca3af', marginBottom: '8px' }}>
                 Slippage Tolerance
@@ -421,7 +494,6 @@ export function SwapInterface() {
               </div>
             </div>
 
-            {/* Deadline */}
             <div style={{ marginBottom: '20px' }}>
               <label style={{ display: 'block', fontSize: '14px', color: '#9ca3af', marginBottom: '8px' }}>
                 Transaction Deadline
@@ -452,16 +524,20 @@ export function SwapInterface() {
               </div>
             </div>
 
-            {/* Save Button */}
-            <button 
-              className="btn-primary"
-              onClick={() => setShowSettings(false)}
-            >
+            <button className="btn-primary" onClick={() => setShowSettings(false)}>
               Save Settings
             </button>
           </div>
         </div>
       )}
+
+      {/* Transaction History Modal */}
+      <TransactionHistory 
+        transactions={transactions}
+        onClear={clearHistory}
+        isOpen={showHistory}
+        onClose={() => setShowHistory(false)}
+      />
     </div>
   );
 }
