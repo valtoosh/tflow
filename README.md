@@ -6,6 +6,129 @@
 
 TigerFlow aggregates RobinPump bonding curves, merchant WETH vaults, and Uniswap V3 to minimize slippage and prevent MEV attacks on large trades.
 
+---
+
+## 🎥 Demo Video
+
+[![TigerFlow Demo](https://img.youtube.com/vi/YOUR_VIDEO_ID/maxresdefault.jpg)](https://youtu.be/YOUR_VIDEO_ID)
+
+**👉 [Watch Full Demo on YouTube](https://youtu.be/YOUR_VIDEO_ID)**
+
+> **Note**: Replace `YOUR_VIDEO_ID` with your actual YouTube video ID after uploading
+
+---
+
+## 📸 UI Screenshots
+
+### Swap Interface
+![Swap Interface - Light Mode](docs/screenshots/swap-interface-empty.png)
+*Clean, intuitive swap interface with real-time ETH price*
+
+![Swap with Quote](docs/screenshots/swap-interface-quote.png)
+*Multi-source route visualization showing RobinPump + Vaults + Uniswap*
+
+![Dark Mode](docs/screenshots/swap-interface-dark.png)
+*Premium dark mode with tiger-themed aesthetics*
+
+### Transaction Success
+![Swap Success Modal](docs/screenshots/swap-success-modal.png)
+*Animated success modal with route breakdown and BaseScan link*
+
+### Transaction History
+![Transaction History](docs/screenshots/transaction-history.png)
+*Complete transaction tracking with filter options*
+
+### Liquidity Vaults
+![Vaults Page](docs/screenshots/vaults-page.png)
+*Live APY display (12-18%) with realistic demo data*
+
+---
+
+## 🎬 Technical Walkthrough Video
+
+[![Code Walkthrough](https://img.shields.io/badge/Loom-Watch%20Walkthrough-00DDB3?style=for-the-badge&logo=loom)](https://www.loom.com/share/YOUR_LOOM_ID)
+
+**What's covered:**
+- Project architecture and repo structure
+- Smart contract integration (RobinPumpAdapter, RouterV2, Vaults)
+- Frontend implementation (React + Wagmi + RainbowKit)
+- Demo mode vs live blockchain interaction
+- How we satisfied hackathon requirements
+
+> **Note**: Upload your Loom video and replace `YOUR_LOOM_ID` with the actual share ID
+
+---
+
+## 🔗 Blockchain Interaction
+
+### How TigerFlow Interacts with Base
+
+**1. Smart Contract Deployment (Base Sepolia)**
+```
+TigerFlowRouterV2 (0x49ca...bC10)
+├── Reads from RobinPumpFactory (0x9F1C...a86a5)
+├── Routes through RobinPumpAdapter (0xEAe4...f00e)
+├── Executes swaps via Vaults (3 deployed)
+└── Falls back to Uniswap V3
+```
+
+**2. Transaction Flow**
+```typescript
+// User initiates swap
+1. Frontend calls getQuote() → RouterV2.getQuote()
+   - Queries RobinPump pools via adapter
+   - Checks vault liquidity
+   - Estimates Uniswap output
+   - Returns optimal route
+
+2. User approves USDC → ERC20.approve(RouterV2)
+   - Standard ERC20 approval
+   - Signed with wallet (MetaMask/Coinbase)
+
+3. User executes swap → RouterV2.executeSwap()
+   - Pulls USDC from user
+   - Routes through sources:
+     a) RobinPumpAdapter.executeBuy() if token on RobinPump
+     b) Vault.executeSwap() for vault portions
+     c) UniswapRouter.exactInputSingle() for remainder
+   - Transfers WETH to user
+   - Emits SwapExecuted event
+
+4. Frontend listens for transaction receipt
+   - Shows success modal
+   - Updates balances via Wagmi hooks
+   - Adds to transaction history
+```
+
+**3. Key Web3 Integrations**
+- **Wagmi Hooks**: `useReadContract`, `useWriteContract`, `useWaitForTransactionReceipt`
+- **Viem**: Type-safe contract calls with `formatUnits`, `parseUnits`
+- **RainbowKit**: Wallet connection (MetaMask, Coinbase, WalletConnect)
+- **Real-time Price**: CoinGecko API for ETH/USD (updates every 60s)
+
+**4. Demo Mode vs Live Mode**
+- **Demo Mode**: Simulates transactions locally (no gas, instant)
+- **Live Mode**: Real blockchain calls to Base Sepolia
+- Toggle via "DEMO" badge in UI
+
+---
+
+## 📊 Canva Presentation
+
+**👉 [View Presentation on Canva](https://www.canva.com/design/YOUR_DESIGN_ID)**
+
+**Slides include:**
+1. Team Introduction
+2. Problem Statement (Large trade slippage)
+3. Solution (Multi-source aggregation)
+4. Technology Stack (Base + RobinPump + Vaults)
+5. Demo Screenshots
+6. Future Roadmap
+
+> **Note**: Create your Canva presentation and replace `YOUR_DESIGN_ID` with the actual design ID
+
+---
+
 ## Full Description
 
 ### Problem
