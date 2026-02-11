@@ -8,6 +8,7 @@ import { useTransactions } from '../hooks/useTransactions';
 import { TransactionHistory } from './TransactionHistory';
 import { useTheme } from '../hooks/useTheme';
 import { useEthPrice, formatUsdValue } from '../hooks/useEthPrice';
+import { useDemoMode } from '../hooks/useDemoMode';
 
 interface VaultData {
   id: string;
@@ -53,6 +54,7 @@ const VAULTS: VaultData[] = [
 function VaultRow({ vault }: { vault: VaultData }) {
   const { isDark } = useTheme();
   const { ethPrice } = useEthPrice();
+  const { isDemoMode } = useDemoMode();
 
   // Read vault stats from contract
   const { data: vaultStats, isLoading: statsLoading } = useReadContract({
@@ -61,7 +63,19 @@ function VaultRow({ vault }: { vault: VaultData }) {
     functionName: 'getVaultStats',
   });
 
-  const [wethBal, , , totalFees, , , tradeCount] = vaultStats || [0n, 0n, 0n, 0n, 0n, 0n, 0n];
+  // Demo mode: realistic mock data (APY 12-18% range)
+  // Formula: APY = (totalFees * 365 * 100) / wethBal
+  const DEMO_VAULT_DATA: Record<string, { wethBal: bigint; totalFees: bigint; tradeCount: bigint }> = {
+    alpha: { wethBal: 25000000000000000000n, totalFees: 8500000000000000n, tradeCount: 156n },  // 25 WETH, fees 0.0085 WETH = ~12.4% APY
+    beta: { wethBal: 18000000000000000000n, totalFees: 8000000000000000n, tradeCount: 98n },    // 18 WETH, fees 0.008 WETH = ~16.2% APY
+    gamma: { wethBal: 32000000000000000000n, totalFees: 16000000000000000n, tradeCount: 234n }, // 32 WETH, fees 0.016 WETH = ~18.3% APY
+  };
+
+  const demoData = DEMO_VAULT_DATA[vault.id];
+  
+  const [wethBal, , , totalFees, , , tradeCount] = isDemoMode 
+    ? [demoData.wethBal, 0n, 0n, demoData.totalFees, 0n, 0n, demoData.tradeCount]
+    : (vaultStats || [0n, 0n, 0n, 0n, 0n, 0n, 0n]);
 
   // Calculate APY from actual fees
   const apy = tradeCount > 0 && wethBal > 0n

@@ -1,0 +1,24 @@
+{
+  "network": "baseSepolia",
+  "timestamp": 1770814126262,
+  "contracts": {
+    "robinPumpFactory": "0x9F1Ca41543C12084bF4467c1671b9938BE2a86a5",
+    "robinPumpAdapter": "0xEAe4659bC849dd82938AF8b93edD87A64178f00e",
+    "routerV2": "0x49ca4100912D413dA17C6B550bf124F5cEBEbC10",
+    "mockTokens": {
+      "tiger": "0xF38b2f5620E927E66D46E85DCDaE0F1556584051",
+      "base": "0xCcb765D61987147307036639e0DC5E80cb82245E",
+      "pump": "0xEE8CEb6446A5c5F4C7b7CD0e7AF6E04d1fAf2491"
+    },
+    "oracle": "0x708cF0E30Fe51800DDC879e97916074ac8548C67",
+    "vaults": {
+      "alpha": "0xaF9b0ebc6B03F199EBCD7C9EEcd00bEdc54e3C76",
+      "beta": "0x1CB5c322Bc4F71914F9f2AEF38FeE4fa68Dc1337",
+      "gamma": "0x4e1Ab1F0a038e404cBf8006109Ef741a4e0bC170"
+    },
+    "tokens": {
+      "usdc": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+      "weth": "0x4200000000000000000000000000000000000006"
+    }
+  }
+}

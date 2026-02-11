@@ -395,5 +395,5 @@ export const ROBIN_PUMP_ADAPTER_ABI = [
 ] as const;
 
 export const ROBIN_PUMP_ADAPTER_ADDRESS = {
-  baseSepolia: '0x...', // To be deployed
+  baseSepolia: '0xEAe4659bC849dd82938AF8b93edD87A64178f00e',
 } as const;

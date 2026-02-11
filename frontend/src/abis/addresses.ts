@@ -1,12 +1,33 @@
-// Base Sepolia Deployment Addresses
+// Base Sepolia Deployment Addresses - V2
 export const ADDRESSES = {
-  router: "0x398506f0E0e18647d3A0e574c94752DdC44f5060",
-  oracle: "0x460b023a87f7Dbe0114357Ab45830F1A41e9C103",
-  vaults: {
-    alpha: "0xd0CB44B07e922d3bc276061bCB9eF41e103Cc872",   // 0.12% fee
-    beta: "0x964d800A7Bf5353084fE6360D22390ABec46f11F",    // 0.15% fee
-    gamma: "0xdDb014C771236CD62e1F3eD6cC9459163960bBDA"   // 0.10% fee
+  // V2 Router with RobinPump support
+  router: "0x49ca4100912D413dA17C6B550bf124F5cEBEbC10",
+  routerV2: "0x49ca4100912D413dA17C6B550bf124F5cEBEbC10",
+  
+  // Oracle
+  oracle: "0x708cF0E30Fe51800DDC879e97916074ac8548C67",
+  
+  // RobinPump Integration
+  robinPump: {
+    factory: "0x9F1Ca41543C12084bF4467c1671b9938BE2a86a5",
+    adapter: "0xEAe4659bC849dd82938AF8b93edD87A64178f00e",
   },
+  
+  // Vaults
+  vaults: {
+    alpha: "0xaF9b0ebc6B03F199EBCD7C9EEcd00bEdc54e3C76",   // 0.12% fee
+    beta: "0x1CB5c322Bc4F71914F9f2AEF38FeE4fa68Dc1337",    // 0.15% fee
+    gamma: "0x4e1Ab1F0a038e404cBf8006109Ef741a4e0bC170"   // 0.10% fee
+  },
+  
+  // Mock RobinPump Tokens
+  robinPumpTokens: {
+    tiger: "0xF38b2f5620E927E66D46E85DCDaE0F1556584051",
+    base: "0xCcb765D61987147307036639e0DC5E80cb82245E",
+    pump: "0xEE8CEb6446A5c5F4C7b7CD0e7AF6E04d1fAf2491",
+  },
+  
+  // Standard Tokens
   tokens: {
     usdc: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
     weth: "0x4200000000000000000000000000000000000006"

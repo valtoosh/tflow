@@ -82,7 +82,10 @@ function Header() {
               </span>
             </button>
             
-            <ConnectButton />
+            <ConnectButton 
+              showBalance={false}
+              accountStatus="address"
+            />
             
             {/* Theme Toggle */}
             <button 

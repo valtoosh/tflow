@@ -1,9 +1,6 @@
-import { useState, useEffect } from 'react';
-import { useReadContract } from 'wagmi';
-import { formatUnits } from 'viem';
+import { useState } from 'react';
 import { TrendingUp, Flame, Clock, ExternalLink } from 'lucide-react';
 import { useTheme } from '../hooks/useTheme';
-import { ROBIN_PUMP_ADAPTER_ABI } from '../abis/RobinPumpAdapter';
 
 interface RobinPumpToken {
   address: string;

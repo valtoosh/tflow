@@ -532,5 +532,5 @@ export const TIGER_FLOW_ROUTER_V2_ABI = [
 ] as const;
 
 export const TIGER_FLOW_ROUTER_V2_ADDRESS = {
-  baseSepolia: '0x...', // To be deployed
+  baseSepolia: '0x49ca4100912D413dA17C6B550bf124F5cEBEbC10',
 } as const;
