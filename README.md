@@ -14,8 +14,6 @@ TigerFlow aggregates RobinPump bonding curves, merchant WETH vaults, and Uniswap
 
 **👉 [Watch Full Demo on YouTube](https://youtu.be/nZkg5Q-8jaE)**
 
-> **Note**: Replace `nZkg5Q-8jaE` with your actual YouTube video ID after uploading
-
 ---
 
 ## 📸 UI Screenshots
