@@ -31,13 +31,13 @@ export function SwapInterface() {
   const { address, isConnected } = useAccount();
   const { isDark } = useTheme();
   const { isDemoMode, toggleDemoMode } = useDemoMode();
-  useEthPrice();
-  
+  const { ethPrice } = useEthPrice();
+
   // Token selection - now supports RobinPump tokens
   const [selectedToken, setSelectedToken] = useState<RobinPumpToken | null>(null);
   const [isWethSelected, setIsWethSelected] = useState(true);
   const [showTokenSelector, setShowTokenSelector] = useState(false);
-  
+
   const [usdcAmount, setUsdcAmount] = useState('');
   const [isApproving, setIsApproving] = useState(false);
   const [isSwapping, setIsSwapping] = useState(false);
@@ -47,16 +47,16 @@ export function SwapInterface() {
   const [swapError, setSwapError] = useState<string | null>(null);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [lastTxHash, setLastTxHash] = useState('');
-  const [completedSwap, setCompletedSwap] = useState<{amount: string; output: string; route: typeof routeSources} | null>(null);
+  const [completedSwap, setCompletedSwap] = useState<{ amount: string; output: string; route: typeof routeSources; ethPrice: number } | null>(null);
 
   const { transactions, addTransaction, updateTransaction, clearHistory } = useTransactions(address);
 
   // Determine which token we're buying
   const targetToken = isWethSelected ? ADDRESSES.tokens.weth : (selectedToken?.address || ADDRESSES.tokens.weth);
-  
+
   // Check if token is on RobinPump
   const { hasActivePool: isRobinPumpToken } = useRobinPumpStatus(targetToken);
-  
+
   // Get optimal route across all sources
   const { route, uniswapOnly, isLoading: routeLoading } = useOptimalRoute(
     targetToken,
@@ -139,11 +139,11 @@ export function SwapInterface() {
     if (!usdcAmount || !address) return;
     setIsApproving(true);
     setSwapError(null);
-    
-    const hash = '0x' + Array.from({ length: 64 }, () => 
+
+    const hash = '0x' + Array.from({ length: 64 }, () =>
       Math.floor(Math.random() * 16).toString(16)
     ).join('');
-    
+
     addTransaction({
       hash,
       type: 'approve',
@@ -151,7 +151,7 @@ export function SwapInterface() {
       from: address,
       amount: usdcAmount,
     });
-    
+
     // Demo mode: simulate successful approval
     if (isDemoMode) {
       setTimeout(() => {
@@ -160,7 +160,7 @@ export function SwapInterface() {
       }, 2000);
       return;
     }
-    
+
     approveUsdc({
       address: ADDRESSES.tokens.usdc,
       abi: ERC20_ABI,
@@ -173,11 +173,11 @@ export function SwapInterface() {
     if (!route || !usdcAmount || !address) return;
     setIsSwapping(true);
     setSwapError(null);
-    
-    const hash = '0x' + Array.from({ length: 64 }, () => 
+
+    const hash = '0x' + Array.from({ length: 64 }, () =>
       Math.floor(Math.random() * 16).toString(16)
     ).join('');
-    
+
     addTransaction({
       hash,
       type: 'swap',
@@ -195,6 +195,7 @@ export function SwapInterface() {
         amount: usdcAmount,
         output: route ? formatUnits(route.totalWethOut, 18) : '0',
         route: routeSources,
+        ethPrice,
       });
       setTimeout(() => {
         setIsSwapping(false);
@@ -239,7 +240,7 @@ export function SwapInterface() {
   const savingsPercent = route && uniswapOnly ? (savings / Number(uniswapOnly)) * 100 : 0;
 
   // Determine route sources for visualizer
-  const routeSources: Array<{type: 'robinpump' | 'vault' | 'uniswap', percentage: number, name: string}> = route?.allocations?.map((alloc: any) => ({
+  const routeSources: Array<{ type: 'robinpump' | 'vault' | 'uniswap', percentage: number, name: string }> = route?.allocations?.map((alloc: any) => ({
     type: alloc.sourceType === 0 ? 'robinpump' : alloc.sourceType === 1 ? 'vault' : 'uniswap',
     percentage: Number(alloc.usdcCost) / Number(parseUnits(usdcAmount || '0', 6)) * 100,
     name: alloc.sourceType === 0 ? 'RobinPump' : alloc.sourceType === 1 ? 'Vault' : 'Uniswap V3',
@@ -248,7 +249,7 @@ export function SwapInterface() {
   return (
     <div className="w-full max-w-[480px] relative">
       {/* Main Card */}
-      <div 
+      <div
         className="relative rounded-3xl shadow-2xl overflow-hidden glass-panel border"
         style={{
           backgroundColor: isDark ? '#2c2117' : '#ffffff',
@@ -259,7 +260,7 @@ export function SwapInterface() {
           {/* Header */}
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
-              <span 
+              <span
                 className="font-semibold text-lg"
                 style={{ color: isDark ? '#ffffff' : '#111827' }}
               >
@@ -268,21 +269,20 @@ export function SwapInterface() {
               {/* Demo Mode Toggle */}
               <button
                 onClick={toggleDemoMode}
-                className={`text-[10px] font-bold px-2 py-0.5 rounded-full border transition-all ${
-                  isDemoMode 
-                    ? 'bg-amber-500/20 text-amber-600 border-amber-500/30' 
-                    : 'bg-green-500/20 text-green-600 border-green-500/30'
-                }`}
+                className={`text-[10px] font-bold px-2 py-0.5 rounded-full border transition-all ${isDemoMode
+                  ? 'bg-amber-500/20 text-amber-600 border-amber-500/30'
+                  : 'bg-green-500/20 text-green-600 border-green-500/30'
+                  }`}
                 title={isDemoMode ? "Click to use real contract data" : "Click to use demo data"}
               >
                 {isDemoMode ? 'DEMO' : 'LIVE'}
               </button>
             </div>
             <div className="flex items-center gap-2">
-              <button 
+              <button
                 onClick={() => setShowHistory(true)}
                 className="p-2 rounded-xl transition-colors"
-                style={{ 
+                style={{
                   color: isDark ? '#9ca3af' : '#6b7280',
                 }}
                 onMouseEnter={(e) => {
@@ -294,10 +294,10 @@ export function SwapInterface() {
               >
                 <History size={18} />
               </button>
-              <button 
-                onClick={() => {}}
+              <button
+                onClick={() => { }}
                 className="p-2 rounded-xl transition-colors"
-                style={{ 
+                style={{
                   color: isDark ? '#9ca3af' : '#6b7280',
                 }}
                 onMouseEnter={(e) => {
@@ -313,18 +313,18 @@ export function SwapInterface() {
           </div>
 
           {/* You Pay */}
-          <div 
+          <div
             className="group rounded-2xl p-6 border border-transparent transition-all"
             style={{ backgroundColor: isDark ? '#3d2e20' : '#f9fafb' }}
           >
             <div className="flex justify-between items-center mb-4">
-              <span 
+              <span
                 className="text-xs font-bold uppercase tracking-widest"
                 style={{ color: isDark ? '#9ca3af' : '#6b7280' }}
               >
                 You Pay
               </span>
-              <span 
+              <span
                 className="text-xs font-medium"
                 style={{ color: isDark ? '#6b7280' : '#9ca3af' }}
               >
@@ -347,7 +347,7 @@ export function SwapInterface() {
                 className="w-full bg-transparent border-none text-4xl sm:text-5xl font-display font-bold p-0 focus:ring-0 focus:outline-none placeholder-gray-300"
                 style={{ color: isDark ? '#ffffff' : '#111827' }}
               />
-              <button 
+              <button
                 className="flex items-center space-x-2 px-4 py-2 rounded-2xl shadow-sm border transition-all hover:border-primary/50"
                 style={{
                   backgroundColor: isDark ? '#2c2117' : '#ffffff',
@@ -355,7 +355,7 @@ export function SwapInterface() {
                 }}
               >
                 <span className="w-7 h-7 bg-blue-600 rounded-full flex items-center justify-center text-[10px] text-white font-black">U</span>
-                <span 
+                <span
                   className="font-bold text-lg"
                   style={{ color: isDark ? '#ffffff' : '#111827' }}
                 >
@@ -364,20 +364,20 @@ export function SwapInterface() {
               </button>
             </div>
             <div className="flex justify-between items-center mt-4">
-              <span 
+              <span
                 className="text-sm"
                 style={{ color: isDark ? '#6b7280' : '#9ca3af' }}
               >
                 ~${usdcAmount || '0.00'}
               </span>
               <div className="flex space-x-1.5">
-                <button 
+                <button
                   onClick={() => usdcBalance && setUsdcAmount(formatUnits(usdcBalance, 6))}
                   className="text-[10px] font-bold text-primary bg-primary/10 hover:bg-primary/20 px-2.5 py-1 rounded-lg transition-colors"
                 >
                   MAX
                 </button>
-                <button 
+                <button
                   onClick={() => usdcBalance && setUsdcAmount((Number(formatUnits(usdcBalance, 6)) / 2).toString())}
                   className="text-[10px] font-bold px-2.5 py-1 rounded-lg transition-colors"
                   style={{
@@ -393,7 +393,7 @@ export function SwapInterface() {
 
           {/* Swap Arrow */}
           <div className="relative h-2 flex justify-center z-10">
-            <button 
+            <button
               onClick={() => setShowTokenSelector(!showTokenSelector)}
               className="group absolute -top-6 w-12 h-12 rounded-2xl flex items-center justify-center shadow-xl transition-all duration-300 hover:scale-110 border-4 active:scale-95"
               style={{
@@ -407,18 +407,18 @@ export function SwapInterface() {
           </div>
 
           {/* You Receive */}
-          <div 
+          <div
             className="group rounded-2xl p-6 border border-transparent transition-all"
             style={{ backgroundColor: isDark ? '#3d2e20' : '#f9fafb' }}
           >
             <div className="flex justify-between items-center mb-4">
-              <span 
+              <span
                 className="text-xs font-bold uppercase tracking-widest"
                 style={{ color: isDark ? '#9ca3af' : '#6b7280' }}
               >
                 You Receive
               </span>
-              <span 
+              <span
                 className="text-xs font-medium"
                 style={{ color: isDark ? '#6b7280' : '#9ca3af' }}
               >
@@ -434,7 +434,7 @@ export function SwapInterface() {
                 className="w-full bg-transparent border-none text-4xl sm:text-5xl font-display font-bold p-0 focus:ring-0 placeholder-gray-300"
                 style={{ color: isDark ? '#ffffff' : '#111827' }}
               />
-              <button 
+              <button
                 onClick={() => setShowTokenSelector(!showTokenSelector)}
                 className="flex items-center space-x-2 px-4 py-2 rounded-2xl shadow-sm border transition-all hover:border-primary/50"
                 style={{
@@ -442,17 +442,17 @@ export function SwapInterface() {
                   borderColor: isDark ? '#3d2e20' : '#e5e7eb'
                 }}
               >
-                <span 
+                <span
                   className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] text-white font-black"
-                  style={{ 
-                    background: isWethSelected 
-                      ? 'linear-gradient(135deg, #8B5CF6 0%, #6366F1 100%)' 
-                      : 'linear-gradient(135deg, #F2541B 0%, #ff6b35 100%)' 
+                  style={{
+                    background: isWethSelected
+                      ? 'linear-gradient(135deg, #8B5CF6 0%, #6366F1 100%)'
+                      : 'linear-gradient(135deg, #F2541B 0%, #ff6b35 100%)'
                   }}
                 >
                   {isWethSelected ? 'W' : selectedToken?.symbol?.[0] || '?'}
                 </span>
-                <span 
+                <span
                   className="font-bold text-lg"
                   style={{ color: isDark ? '#ffffff' : '#111827' }}
                 >
@@ -461,7 +461,7 @@ export function SwapInterface() {
                 <ChevronDown size={16} style={{ color: isDark ? '#6b7280' : '#9ca3af' }} />
               </button>
             </div>
-            
+
             {/* Token Selector Dropdown */}
             {showTokenSelector && (
               <div className="mt-4 space-y-2">
@@ -473,7 +473,7 @@ export function SwapInterface() {
                   }}
                   className="w-full flex items-center gap-3 p-3 rounded-xl transition-colors"
                   style={{
-                    backgroundColor: isWethSelected 
+                    backgroundColor: isWethSelected
                       ? (isDark ? 'rgba(242, 84, 27, 0.1)' : 'rgba(242, 84, 27, 0.05)')
                       : 'transparent'
                   }}
@@ -484,12 +484,12 @@ export function SwapInterface() {
                     <p className="text-xs" style={{ color: isDark ? '#9ca3af' : '#6b7280' }}>Wrapped Ether</p>
                   </div>
                 </button>
-                
-                <div 
+
+                <div
                   className="p-3 rounded-xl"
                   style={{ backgroundColor: isDark ? '#2c2117' : '#f3f4f6' }}
                 >
-                  <p 
+                  <p
                     className="text-xs font-bold uppercase tracking-wider mb-2"
                     style={{ color: isDark ? '#9ca3af' : '#6b7280' }}
                   >
@@ -507,18 +507,18 @@ export function SwapInterface() {
                 </div>
               </div>
             )}
-            
+
             <div className="flex justify-between items-center mt-4">
-              <span 
+              <span
                 className="text-sm"
                 style={{ color: isDark ? '#6b7280' : '#9ca3af' }}
               >
                 {route && usdcAmount ? `~$${parseFloat(usdcAmount).toFixed(2)}` : '~$0.00'}
               </span>
               {isRobinPumpToken && (
-                <span 
+                <span
                   className="text-xs font-semibold px-2 py-1 rounded-lg"
-                  style={{ 
+                  style={{
                     backgroundColor: isDark ? 'rgba(242, 84, 27, 0.2)' : 'rgba(242, 84, 27, 0.1)',
                     color: '#F2541B'
                   }}
@@ -532,9 +532,9 @@ export function SwapInterface() {
 
           {/* Error Message */}
           {swapError && (
-            <div 
+            <div
               className="p-3 rounded-xl text-sm"
-              style={{ 
+              style={{
                 backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : 'rgba(239, 68, 68, 0.05)',
                 color: '#ef4444'
               }}
@@ -549,10 +549,10 @@ export function SwapInterface() {
               <div className="flex justify-between text-sm">
                 <span style={{ color: isDark ? '#9ca3af' : '#6b7280' }}>Rate</span>
                 <span style={{ color: isDark ? '#ffffff' : '#111827' }}>
-                  1 USDC ≈ {(Number(route.totalWethOut) / Number(parseUnits(usdcAmount, 6))).toFixed(6)} {isWethSelected ? 'WETH' : selectedToken?.symbol}
+                  1 USDC ≈ {(1 / ethPrice).toFixed(6)} {isWethSelected ? 'WETH' : selectedToken?.symbol}
                 </span>
               </div>
-              
+
               {savings > 0 && (
                 <div className="flex justify-between text-sm">
                   <span style={{ color: isDark ? '#9ca3af' : '#6b7280' }}>vs Uniswap</span>
@@ -561,12 +561,12 @@ export function SwapInterface() {
                   </span>
                 </div>
               )}
-              
+
               <div className="flex justify-between text-sm">
                 <span style={{ color: isDark ? '#9ca3af' : '#6b7280' }}>Max Slippage</span>
                 <span style={{ color: isDark ? '#ffffff' : '#111827' }}>{slippage}%</span>
               </div>
-              
+
               <div className="flex justify-between text-sm">
                 <span style={{ color: isDark ? '#9ca3af' : '#6b7280' }}>Network Fee</span>
                 <span className="flex items-center" style={{ color: isDark ? '#ffffff' : '#111827' }}>
@@ -574,9 +574,9 @@ export function SwapInterface() {
                   ~$0.85
                 </span>
               </div>
-              
+
               {/* Route Visualizer */}
-              <RouteVisualizer 
+              <RouteVisualizer
                 sources={routeSources}
                 isAnimating={isSwapping}
               />
@@ -588,7 +588,7 @@ export function SwapInterface() {
             onClick={needsApproval() ? handleApprove : handleSwap}
             disabled={!isConnected || !usdcAmount || parseFloat(usdcAmount) <= 0 || isApproving || isSwapping || routeLoading}
             className="w-full py-4 rounded-2xl font-bold text-lg text-white transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
-            style={{ 
+            style={{
               background: 'linear-gradient(135deg, #F2541B 0%, #D9420D 100%)',
               boxShadow: '0 4px 20px -5px rgba(242, 84, 27, 0.4)'
             }}
@@ -622,7 +622,7 @@ export function SwapInterface() {
         </div>
       </div>
 
-      <TransactionHistory 
+      <TransactionHistory
         transactions={transactions}
         onClear={clearHistory}
         isOpen={showHistory}
