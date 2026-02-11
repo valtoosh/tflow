@@ -1,130 +1,177 @@
-import { useRef, useEffect, useCallback } from 'react';
-import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { BrowserRouter, Routes, Route, Link, useLocation } from 'react-router-dom';
-import { Zap, Shield, TrendingUp } from 'lucide-react';
 import { SwapInterface } from './components/SwapInterface';
 import { Vaults } from './components/Vaults';
-
-// Spotlight hook for mouse tracking
-function useSpotlight(ref: React.RefObject<HTMLElement>) {
-  const handleMouseMove = useCallback((e: MouseEvent) => {
-    if (!ref.current) return;
-    const rect = ref.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    ref.current.style.setProperty('--mouse-x', `${x}px`);
-    ref.current.style.setProperty('--mouse-y', `${y}px`);
-  }, [ref]);
-
-  useEffect(() => {
-    const element = ref.current;
-    if (!element) return;
-    element.addEventListener('mousemove', handleMouseMove);
-    return () => element.removeEventListener('mousemove', handleMouseMove);
-  }, [ref, handleMouseMove]);
-}
+import { ConnectButton } from '@rainbow-me/rainbowkit';
+import { useTheme } from './hooks/useTheme';
+import { Sun, Moon } from 'lucide-react';
 
 function Header() {
   const location = useLocation();
+  const { toggleTheme, isDark } = useTheme();
   
   return (
-    <header className="header">
-      <div className="container">
-        <div className="header-inner">
-          <Link to="/" className="logo">
-            <img src="/tiger-logo.svg" alt="TigerFlow" />
-            <span className="logo-text">TigerFlow</span>
+    <nav 
+      className="sticky top-0 z-50 border-b backdrop-blur-md transition-colors duration-300"
+      style={{
+        backgroundColor: isDark ? 'rgba(44, 33, 23, 0.7)' : 'rgba(255, 255, 255, 0.7)',
+        borderColor: isDark ? '#3d2e20' : '#e5e7eb'
+      }}
+    >
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex items-center h-16">
+          {/* Logo */}
+          <Link to="/" className="flex items-center space-x-2 flex-shrink-0">
+            <div className="relative w-8 h-8">
+              <img src="/tiger-logo.svg" alt="TigerFlow" className="w-full h-full object-contain rounded-full" />
+            </div>
+            <span 
+              className="font-display font-bold text-xl tracking-tight"
+              style={{ color: isDark ? '#ffffff' : '#111827' }}
+            >
+              TigerFlow
+            </span>
           </Link>
           
-          <nav className="nav">
-            <Link 
-              to="/" 
-              className={`nav-link ${location.pathname === '/' ? 'active' : ''}`}
-            >
-              Swap
-            </Link>
-            <Link 
-              to="/vaults" 
-              className={`nav-link ${location.pathname === '/vaults' ? 'active' : ''}`}
-            >
-              Vaults
-            </Link>
-            <a 
-              href="#" 
-              className="nav-link"
-              onClick={(e) => {
-                e.preventDefault();
-                alert('Docs coming soon!');
+          {/* Nav - Centered */}
+          <div className="flex-1 flex justify-center">
+            <div 
+              className="hidden md:flex items-center space-x-1 p-1 rounded-xl border"
+              style={{
+                backgroundColor: isDark ? '#3d2e20' : '#f3f4f6',
+                borderColor: isDark ? '#3d2e20' : '#e5e7eb'
               }}
             >
-              Docs
-            </a>
-          </nav>
+              <Link 
+                to="/" 
+                className="px-5 py-1.5 rounded-lg text-sm font-semibold transition-all"
+                style={{
+                  backgroundColor: location.pathname === '/' ? (isDark ? '#2c2117' : '#ffffff') : 'transparent',
+                  color: location.pathname === '/' ? '#F2541B' : (isDark ? '#9ca3af' : '#6b7280'),
+                  boxShadow: location.pathname === '/' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'
+                }}
+              >
+                Swap
+              </Link>
+              <Link 
+                to="/vaults" 
+                className="px-5 py-1.5 rounded-lg text-sm font-semibold transition-all"
+                style={{
+                  backgroundColor: location.pathname === '/vaults' ? (isDark ? '#2c2117' : '#ffffff') : 'transparent',
+                  color: location.pathname === '/vaults' ? '#F2541B' : (isDark ? '#9ca3af' : '#6b7280'),
+                  boxShadow: location.pathname === '/vaults' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'
+                }}
+              >
+                Vaults
+              </Link>
+            </div>
+          </div>
           
-          <ConnectButton />
+          {/* Right Side */}
+          <div className="flex items-center space-x-3 flex-shrink-0">
+            {/* Network Badge */}
+            <button 
+              className="hidden sm:flex items-center space-x-2 px-3 py-1.5 rounded-lg transition-colors border"
+              style={{
+                backgroundColor: isDark ? '#3d2e20' : '#f3f4f6',
+                borderColor: isDark ? '#3d2e20' : '#e5e7eb'
+              }}
+            >
+              <div className="w-5 h-5 bg-blue-500 rounded-full flex items-center justify-center text-[10px] font-bold text-white">B</div>
+              <span 
+                className="text-xs font-bold uppercase tracking-wide"
+                style={{ color: isDark ? '#d1d5db' : '#374151' }}
+              >
+                Base
+              </span>
+            </button>
+            
+            <ConnectButton />
+            
+            {/* Theme Toggle */}
+            <button 
+              onClick={toggleTheme}
+              className="p-2 rounded-lg transition-colors"
+              style={{ color: isDark ? '#9ca3af' : '#6b7280' }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = isDark ? '#3d2e20' : '#f3f4f6';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent';
+              }}
+            >
+              {isDark ? <Sun size={20} /> : <Moon size={20} />}
+            </button>
+          </div>
         </div>
       </div>
-    </header>
-  );
-}
-
-function FeatureCard({ icon: Icon, title, description }: { icon: any, title: string, description: string }) {
-  const cardRef = useRef<HTMLDivElement>(null);
-  useSpotlight(cardRef);
-
-  return (
-    <div ref={cardRef} className="feature-card">
-      <div className="feature-icon">
-        <Icon size={20} />
-      </div>
-      <h3>{title}</h3>
-      <p>{description}</p>
-    </div>
+    </nav>
   );
 }
 
 function Home() {
+  const { isDark } = useTheme();
+  
   return (
-    <main>
-      <div className="container">
-        <div className="hero">
-          <h1>Swap with TigerFlow</h1>
-          <p>Large trade execution on Base with minimal slippage</p>
+    <main className="flex-grow flex flex-col items-center justify-center p-4 relative w-full">
+      {/* Background Orbs */}
+      <div className="fixed inset-0 z-0 overflow-hidden pointer-events-none">
+        <div className="absolute -top-[10%] -left-[10%] w-[50%] h-[50%] bg-primary/20 rounded-full orb" />
+        <div className="absolute bottom-[5%] right-[-5%] w-[40%] h-[40%] bg-blue-500/10 rounded-full orb" />
+      </div>
+      
+      <div className="relative z-10 text-center w-full flex flex-col items-center">
+        {/* Title */}
+        <div className="mb-10">
+          <h1 
+            className="text-4xl md:text-5xl font-display font-bold mb-4 tracking-tight"
+            style={{ color: isDark ? '#ffffff' : '#111827' }}
+          >
+            {isDark ? (
+              <><span style={{ color: '#9ca3af' }}>Immersive</span> <span className="text-primary">Flow</span></>
+            ) : (
+              <>Express <span className="text-primary">Swap</span></>
+            )}
+          </h1>
+          <p 
+            className="text-lg font-medium max-w-md mx-auto"
+            style={{ color: isDark ? '#9ca3af' : '#4b5563' }}
+          >
+            {isDark 
+              ? 'Harness the power of a multi-dimensional liquidity network for supreme execution speed.'
+              : 'Fastest route, zero complexity.'
+            }
+          </p>
         </div>
-
-        <div className="stats">
-          <div className="stat">
-            <div className="stat-value">0.01 WETH</div>
-            <div className="stat-label">Total Liquidity</div>
-          </div>
-          <div className="stat">
-            <div className="stat-value">0.10-0.15%</div>
-            <div className="stat-label">Vault Fees</div>
-          </div>
-          <div className="stat">
-            <div className="stat-value">3</div>
-            <div className="stat-label">Active Vaults</div>
-          </div>
-        </div>
-
+        
         <SwapInterface />
-
-        <div className="features">
-          <FeatureCard 
-            icon={Zap}
-            title="Smart Routing"
-            description="Optimal split between merchant liquidity and DEX"
-          />
-          <FeatureCard 
-            icon={Shield}
-            title="Minimal Slippage"
-            description="Up to 50% less slippage on large trades"
-          />
-          <FeatureCard 
-            icon={TrendingUp}
-            title="Earn Fees"
-            description="Deposit WETH to earn swap fees"
-          />
+        
+        {/* Stats */}
+        <div className="mt-10 flex justify-center space-x-10 text-center">
+          <div>
+            <p 
+              className="text-[10px] uppercase font-bold tracking-widest mb-1"
+              style={{ color: '#6b7280' }}
+            >
+              {isDark ? 'Total Flow' : 'Volume (24h)'}
+            </p>
+            <p 
+              className="text-lg font-display font-bold"
+              style={{ color: isDark ? '#ffffff' : '#111827' }}
+            >
+              $42.8M
+            </p>
+          </div>
+          <div>
+            <p 
+              className="text-[10px] uppercase font-bold tracking-widest mb-1"
+              style={{ color: '#6b7280' }}
+            >
+              {isDark ? 'Latency' : 'Avg Speed'}
+            </p>
+            <p className="text-lg font-display font-bold text-primary">
+              {isDark ? '24ms' : '~2.4s'}
+            </p>
+          </div>
         </div>
       </div>
     </main>
@@ -132,28 +179,73 @@ function Home() {
 }
 
 function Footer() {
+  const { isDark } = useTheme();
+  
   return (
-    <footer className="footer">
-      <div className="container">
-        <p>
-          Built on <a href="https://base.org" target="_blank" rel="noopener noreferrer">Base</a> • 
-          Contracts verified on <a href="https://sepolia.basescan.org" target="_blank" rel="noopener noreferrer">BaseScan</a>
-        </p>
+    <footer 
+      className="mt-auto border-t py-8 relative z-10 transition-colors duration-300"
+      style={{
+        backgroundColor: isDark ? '#2c2117' : '#ffffff',
+        borderColor: isDark ? '#3d2e20' : '#e5e7eb'
+      }}
+    >
+      <div className="max-w-7xl mx-auto px-4 flex flex-col md:flex-row justify-between items-center text-sm">
+        <div 
+          className="flex items-center space-x-4 mb-4 md:mb-0"
+          style={{ color: isDark ? '#9ca3af' : '#6b7280' }}
+        >
+          <span 
+            className="font-bold"
+            style={{ color: isDark ? '#ffffff' : '#111827' }}
+          >
+            TigerFlow
+          </span>
+          <span className="opacity-60">© 2024</span>
+          {isDark && (
+            <span className="text-[11px] tracking-widest opacity-60">V1.2.4-STABLE</span>
+          )}
+        </div>
+        <div 
+          className="flex space-x-8 font-medium"
+          style={{ color: isDark ? '#9ca3af' : '#6b7280' }}
+        >
+          {isDark ? (
+            <>
+              <a href="#" className="hover:text-primary transition-colors">Network Status</a>
+              <a href="#" className="hover:text-primary transition-colors">Security</a>
+              <a href="#" className="hover:text-primary transition-colors">Interface</a>
+              <a href="#" className="hover:text-primary transition-colors">Satellite</a>
+            </>
+          ) : (
+            <>
+              <a href="#" className="hover:text-primary transition-colors">Security</a>
+              <a href="#" className="hover:text-primary transition-colors">Support</a>
+              <a href="#" className="hover:text-primary transition-colors">Twitter</a>
+              <a href="#" className="hover:text-primary transition-colors">Documentation</a>
+            </>
+          )}
+        </div>
       </div>
     </footer>
   );
 }
 
 function AppContent() {
+  const { isDark } = useTheme();
+  
   return (
-    <div className="min-h-screen" style={{ background: '#0b0e11', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+    <div 
+      className="min-h-screen flex flex-col transition-colors duration-300"
+      style={{
+        backgroundColor: isDark ? '#221910' : '#F8F9FA',
+        color: isDark ? '#F3F4F6' : '#1F2937'
+      }}
+    >
       <Header />
-      <div style={{ flex: 1 }}>
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/vaults" element={<Vaults />} />
-        </Routes>
-      </div>
+      <Routes>
+        <Route path="/" element={<Home />} />
+        <Route path="/vaults" element={<Vaults />} />
+      </Routes>
       <Footer />
     </div>
   );

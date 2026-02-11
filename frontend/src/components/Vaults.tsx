@@ -1,435 +1,384 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
-import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
-import { formatUnits, parseUnits } from 'viem';
-import { TrendingUp, Wallet, ExternalLink, ArrowDown, ArrowUp, Loader2, History } from 'lucide-react';
+import { useState } from 'react';
+import { useAccount, useReadContract } from 'wagmi';
+import { formatUnits } from 'viem';
+import { ExternalLink, Loader2 } from 'lucide-react';
 import { LIQUIDITY_VAULT_ABI } from '../abis/LiquidityVault';
-import { ERC20_ABI } from '../abis/ERC20';
 import { ADDRESSES } from '../abis/addresses';
 import { useTransactions } from '../hooks/useTransactions';
 import { TransactionHistory } from './TransactionHistory';
-
-// Spotlight hook
-function useSpotlight(ref: React.RefObject<HTMLElement>) {
-  const handleMouseMove = useCallback((e: MouseEvent) => {
-    if (!ref.current) return;
-    const rect = ref.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    ref.current.style.setProperty('--mouse-x', `${x}px`);
-    ref.current.style.setProperty('--mouse-y', `${y}px`);
-  }, [ref]);
-
-  useEffect(() => {
-    const element = ref.current;
-    if (!element) return;
-    element.addEventListener('mousemove', handleMouseMove);
-    return () => element.removeEventListener('mousemove', handleMouseMove);
-  }, [ref, handleMouseMove]);
-}
+import { useTheme } from '../hooks/useTheme';
+import { useEthPrice, formatUsdValue } from '../hooks/useEthPrice';
 
 interface VaultData {
+  id: string;
   name: string;
-  address: string;
+  tokenA: { symbol: string; color: string };
+  tokenB: { symbol: string; color: string };
+  type: 'Volatile' | 'Stable' | 'Hyper';
   fee: string;
-  feeBps: number;
+  address: string;
 }
 
+// Real deployed vaults on Base Sepolia
 const VAULTS: VaultData[] = [
-  { name: 'Alpha Vault', address: ADDRESSES.vaults.alpha, fee: '0.12%', feeBps: 12 },
-  { name: 'Beta Vault', address: ADDRESSES.vaults.beta, fee: '0.15%', feeBps: 15 },
-  { name: 'Gamma Vault', address: ADDRESSES.vaults.gamma, fee: '0.10%', feeBps: 10 },
+  {
+    id: 'alpha',
+    name: 'Alpha Vault',
+    tokenA: { symbol: 'W', color: '#8B5CF6' },
+    tokenB: { symbol: 'U', color: '#3B82F6' },
+    type: 'Volatile',
+    fee: '0.12%',
+    address: ADDRESSES.vaults.alpha,
+  },
+  {
+    id: 'beta',
+    name: 'Beta Vault',
+    tokenA: { symbol: 'W', color: '#8B5CF6' },
+    tokenB: { symbol: 'U', color: '#3B82F6' },
+    type: 'Stable',
+    fee: '0.15%',
+    address: ADDRESSES.vaults.beta,
+  },
+  {
+    id: 'gamma',
+    name: 'Gamma Vault',
+    tokenA: { symbol: 'W', color: '#8B5CF6' },
+    tokenB: { symbol: 'U', color: '#3B82F6' },
+    type: 'Hyper',
+    fee: '0.10%',
+    address: ADDRESSES.vaults.gamma,
+  },
 ];
 
-function VaultCard({ vault, onAddTx, onUpdateTx }: { vault: VaultData, onAddTx: any, onUpdateTx: any }) {
-  const { address } = useAccount();
-  const [amount, setAmount] = useState('');
-  const [action, setAction] = useState<'deposit' | 'withdraw' | null>(null);
-  const [isApproving, setIsApproving] = useState(false);
-  const cardRef = useRef<HTMLDivElement>(null);
-  useSpotlight(cardRef);
-
-  // Read vault stats
-  const { data: vaultStats, refetch: refetchStats } = useReadContract({
+function VaultRow({ vault }: { vault: VaultData }) {
+  const { isDark } = useTheme();
+  const { ethPrice } = useEthPrice();
+  
+  // Read vault stats from contract
+  const { data: vaultStats, isLoading: statsLoading } = useReadContract({
     address: vault.address as `0x${string}`,
     abi: LIQUIDITY_VAULT_ABI,
     functionName: 'getVaultStats',
   });
 
-  const { data: wethBalance } = useReadContract({
-    address: ADDRESSES.tokens.weth,
-    abi: ERC20_ABI,
-    functionName: 'balanceOf',
-    args: address ? [address] : undefined,
+  const [wethBal, , , totalFees, , , tradeCount] = vaultStats || [0n, 0n, 0n, 0n, 0n, 0n, 0n];
+
+  // Calculate APY from actual fees
+  const apy = tradeCount > 0 && wethBal > 0n 
+    ? ((Number(totalFees) * 365 * 100) / Number(wethBal)).toFixed(1)
+    : '0.0';
+
+  // Format TVL using real ETH price
+  const tvl = wethBal > 0n 
+    ? formatUsdValue(formatUnits(wethBal, 18), ethPrice)
+    : '$0';
+
+  return (
+    <div 
+      className="group rounded-2xl md:rounded-none p-4 md:px-4 md:py-6 md:grid md:grid-cols-12 md:gap-4 md:items-center border-b transition-all duration-200"
+      style={{
+        backgroundColor: isDark ? 'rgba(61, 46, 32, 0.5)' : '#f9fafb',
+        borderColor: isDark ? 'transparent' : 'transparent',
+      }}
+      onMouseEnter={(e) => {
+        if (isDark) {
+          e.currentTarget.style.backgroundColor = '#3d2e20';
+        } else {
+          e.currentTarget.style.backgroundColor = '#f3f4f6';
+        }
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.backgroundColor = isDark ? 'rgba(61, 46, 32, 0.5)' : '#f9fafb';
+      }}
+    >
+      {/* Vault Name */}
+      <div className="col-span-4 flex items-center space-x-4 mb-4 md:mb-0">
+        {/* Dual Token Icons */}
+        <div className="relative w-12 h-12 flex-shrink-0">
+          <div 
+            className="w-8 h-8 absolute top-0 left-0 rounded-full flex items-center justify-center text-[10px] text-white font-black z-10 border-2"
+            style={{ 
+              background: vault.tokenA.color,
+              borderColor: isDark ? '#2c2117' : '#ffffff'
+            }}
+          >
+            {vault.tokenA.symbol}
+          </div>
+          <div 
+            className="w-8 h-8 absolute bottom-0 right-0 rounded-full flex items-center justify-center text-[10px] text-white font-black z-20 border-2"
+            style={{ 
+              background: vault.tokenB.color,
+              borderColor: isDark ? '#2c2117' : '#ffffff'
+            }}
+          >
+            {vault.tokenB.symbol}
+          </div>
+        </div>
+        
+        <div>
+          <h3 
+            className="font-display font-bold text-lg"
+            style={{ color: isDark ? '#ffffff' : '#111827' }}
+          >
+            {vault.name}
+          </h3>
+          <div className="flex items-center space-x-2 mt-1">
+            <span 
+              className="text-xs font-medium px-2 py-0.5 rounded-md"
+              style={{ 
+                backgroundColor: isDark ? '#3d2e20' : '#e5e7eb',
+                color: isDark ? '#9ca3af' : '#6b7280'
+              }}
+            >
+              {vault.type}
+            </span>
+            <span 
+              className="text-xs font-medium px-2 py-0.5 rounded-md"
+              style={{ 
+                backgroundColor: isDark ? '#3d2e20' : '#e5e7eb',
+                color: isDark ? '#9ca3af' : '#6b7280'
+              }}
+            >
+              {vault.fee} Fee
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Mobile Stats */}
+      <div className="grid grid-cols-2 gap-4 md:hidden mb-4">
+        <div>
+          <p style={{ color: '#6b7280', fontSize: '12px', marginBottom: '4px' }}>APY</p>
+          <p className="font-display font-bold text-lg text-primary">
+            {statsLoading ? <Loader2 size={16} className="animate-spin" /> : `${apy}%`}
+          </p>
+        </div>
+        <div>
+          <p style={{ color: '#6b7280', fontSize: '12px', marginBottom: '4px' }}>TVL</p>
+          <p 
+            className="font-display font-bold text-lg"
+            style={{ color: isDark ? '#ffffff' : '#111827' }}
+          >
+            {statsLoading ? <Loader2 size={16} className="animate-spin" /> : tvl}
+          </p>
+        </div>
+        <div>
+          <p style={{ color: '#6b7280', fontSize: '12px', marginBottom: '4px' }}>My Deposit</p>
+          <p 
+            className="font-display font-bold text-lg"
+            style={{ color: isDark ? '#ffffff' : '#111827' }}
+          >
+            $0.00
+          </p>
+        </div>
+      </div>
+
+      {/* Desktop Stats */}
+      <div className="hidden md:block col-span-2 text-right">
+        {statsLoading ? (
+          <Loader2 size={16} className="animate-spin ml-auto" />
+        ) : (
+          <span className="font-display font-bold text-lg text-primary">{apy}%</span>
+        )}
+      </div>
+      <div className="hidden md:block col-span-2 text-right">
+        {statsLoading ? (
+          <Loader2 size={16} className="animate-spin ml-auto" />
+        ) : (
+          <span 
+            className="font-display font-bold text-base"
+            style={{ color: isDark ? '#ffffff' : '#111827' }}
+          >
+            {tvl}
+          </span>
+        )}
+      </div>
+      <div className="hidden md:block col-span-2 text-right">
+        <span 
+          className="font-display font-bold text-base"
+          style={{ color: isDark ? '#9ca3af' : '#6b7280' }}
+        >
+          $0.00
+        </span>
+      </div>
+
+      {/* Actions */}
+      <div className="col-span-2 flex items-center justify-end space-x-2">
+        <a
+          href={`https://sepolia.basescan.org/address/${vault.address}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex-1 md:flex-none py-2 px-4 rounded-xl text-sm font-bold transition-colors flex items-center justify-center gap-1 border"
+          style={{
+            backgroundColor: isDark ? '#3d2e20' : '#ffffff',
+            borderColor: isDark ? '#3d2e20' : '#e5e7eb',
+            color: isDark ? '#9ca3af' : '#6b7280'
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.backgroundColor = isDark ? '#2c2117' : '#f9fafb';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = isDark ? '#3d2e20' : '#ffffff';
+          }}
+        >
+          <ExternalLink size={14} />
+          <span className="hidden sm:inline">Manage</span>
+        </a>
+        <button 
+          className="flex-1 md:flex-none py-2 px-4 rounded-xl text-sm font-bold text-white bg-primary hover:bg-primary-hover shadow-lg shadow-orange-500/20 transition-all hover:scale-105 active:scale-95"
+        >
+          Deposit
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function VaultStats() {
+  const { isDark } = useTheme();
+  const { ethPrice } = useEthPrice();
+  
+  // Read all vault stats
+  const { data: alphaStats } = useReadContract({
+    address: VAULTS[0].address as `0x${string}`,
+    abi: LIQUIDITY_VAULT_ABI,
+    functionName: 'getVaultStats',
+  });
+  const { data: betaStats } = useReadContract({
+    address: VAULTS[1].address as `0x${string}`,
+    abi: LIQUIDITY_VAULT_ABI,
+    functionName: 'getVaultStats',
+  });
+  const { data: gammaStats } = useReadContract({
+    address: VAULTS[2].address as `0x${string}`,
+    abi: LIQUIDITY_VAULT_ABI,
+    functionName: 'getVaultStats',
   });
 
-  const { data: wethAllowance, refetch: refetchAllowance } = useReadContract({
-    address: ADDRESSES.tokens.weth,
-    abi: ERC20_ABI,
-    functionName: 'allowance',
-    args: address ? [address, vault.address as `0x${string}`] : undefined,
-  });
-
-  // Write contracts
-  const { writeContract: approveWeth, data: approveHash } = useWriteContract();
-  const { writeContract: deposit, data: depositHash } = useWriteContract();
-  const { writeContract: withdrawWeth, data: withdrawHash } = useWriteContract();
-
-  const { isSuccess: approveSuccess } = useWaitForTransactionReceipt({ hash: approveHash });
-  const { isSuccess: depositSuccess } = useWaitForTransactionReceipt({ hash: depositHash });
-  const { isSuccess: withdrawSuccess } = useWaitForTransactionReceipt({ hash: withdrawHash });
-
-  useEffect(() => {
-    if (approveSuccess) {
-      setIsApproving(false);
-      refetchAllowance();
-      if (approveHash) onUpdateTx(approveHash, { status: 'success' });
-    }
-  }, [approveSuccess, refetchAllowance, approveHash, onUpdateTx]);
-
-  useEffect(() => {
-    if (depositSuccess) {
-      setAmount('');
-      setAction(null);
-      refetchStats();
-      if (depositHash) onUpdateTx(depositHash, { status: 'success' });
-    }
-  }, [depositSuccess, refetchStats, depositHash, onUpdateTx]);
-
-  useEffect(() => {
-    if (withdrawSuccess) {
-      setAmount('');
-      setAction(null);
-      refetchStats();
-      if (withdrawHash) onUpdateTx(withdrawHash, { status: 'success' });
-    }
-  }, [withdrawSuccess, refetchStats, withdrawHash, onUpdateTx]);
-
-  const [wethBal, usdcBal,,, totalVolume,, tradeCount] = vaultStats || [0n, 0n, 0n, 0n, 0n, 0n, 0n];
-
-  const needsApproval = () => {
-    if (!amount || !wethAllowance || action !== 'deposit') return false;
-    return wethAllowance < parseUnits(amount, 18);
-  };
-
-  const handleApprove = () => {
-    if (!amount) return;
-    setIsApproving(true);
+  // Calculate total TVL
+  const totalWeth = (alphaStats?.[0] || 0n) + (betaStats?.[0] || 0n) + (gammaStats?.[0] || 0n);
+  const totalFees = (alphaStats?.[3] || 0n) + (betaStats?.[3] || 0n) + (gammaStats?.[3] || 0n);
+  
+  const totalTvl = totalWeth > 0n 
+    ? formatUsdValue(formatUnits(totalWeth, 18), ethPrice)
+    : '$0';
     
-    onAddTx({
-      hash: '',
-      type: 'approve',
-      description: `Approve WETH for ${vault.name}`,
-      from: address!,
-    });
+  const dailyFees = totalFees > 0n
+    ? `$${(Number(formatUnits(totalFees, 6)) / 100).toFixed(2)}` // Approximate daily
+    : '$0.00';
 
-    approveWeth({
-      address: ADDRESSES.tokens.weth,
-      abi: ERC20_ABI,
-      functionName: 'approve',
-      args: [vault.address as `0x${string}`, parseUnits(amount, 18)],
-    }, {
-      onSuccess: (hash) => onUpdateTx('', { hash }),
-    });
+  const cardStyle = {
+    backgroundColor: isDark ? 'rgba(44, 33, 23, 0.5)' : 'rgba(255, 255, 255, 0.5)',
+    borderColor: isDark ? 'rgba(61, 46, 32, 0.3)' : 'rgba(255, 255, 255, 0.2)',
+    borderWidth: '1px',
+    borderStyle: 'solid'
   };
 
-  const handleDeposit = () => {
-    if (!amount) return;
-    
-    onAddTx({
-      hash: '',
-      type: 'deposit',
-      description: `Deposit ${amount} WETH to ${vault.name}`,
-      from: address!,
-      amount,
-    });
-
-    deposit({
-      address: vault.address as `0x${string}`,
-      abi: LIQUIDITY_VAULT_ABI,
-      functionName: 'deposit',
-      args: [parseUnits(amount, 18)],
-    }, {
-      onSuccess: (hash) => onUpdateTx('', { hash }),
-    });
-  };
-
-  const handleWithdraw = () => {
-    if (!amount) return;
-    
-    onAddTx({
-      hash: '',
-      type: 'withdraw',
-      description: `Withdraw ${amount} WETH from ${vault.name}`,
-      from: address!,
-      amount,
-    });
-
-    withdrawWeth({
-      address: vault.address as `0x${string}`,
-      abi: LIQUIDITY_VAULT_ABI,
-      functionName: 'withdrawWeth',
-      args: [parseUnits(amount, 18)],
-    }, {
-      onSuccess: (hash) => onUpdateTx('', { hash }),
-    });
-  };
-
-  const formatAmount = (amount: bigint, decimals: number) => {
-    if (!amount) return '0.0000';
-    return parseFloat(formatUnits(amount, decimals)).toFixed(4);
+  const labelStyle = {
+    color: '#6b7280',
+    fontSize: '10px',
+    textTransform: 'uppercase' as const,
+    fontWeight: 700,
+    letterSpacing: '0.1em',
+    marginBottom: '4px'
   };
 
   return (
-    <div ref={cardRef} className="feature-card" style={{ position: 'relative' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <div style={{ 
-            width: '48px', 
-            height: '48px', 
-            borderRadius: '12px', 
-            background: 'rgba(255, 107, 53, 0.1)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}>
-            <Wallet size={24} style={{ color: '#ff6b35' }} />
-          </div>
-          <div>
-            <h3 style={{ fontSize: '18px', fontWeight: 600, marginBottom: '2px' }}>{vault.name}</h3>
-            <a 
-              href={`https://sepolia.basescan.org/address/${vault.address}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{ fontSize: '12px', color: '#6b7280', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '4px' }}
-            >
-              {vault.address.slice(0, 6)}...{vault.address.slice(-4)}
-              <ExternalLink size={10} />
-            </a>
-          </div>
-        </div>
-        <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: '12px', color: '#6b7280' }}>Fee</div>
-          <div style={{ fontSize: '16px', fontWeight: 600, color: '#10b981' }}>{vault.fee}</div>
-        </div>
+    <div className="mt-8 grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
+      <div className="rounded-2xl p-4 backdrop-blur-sm" style={cardStyle}>
+        <p style={labelStyle}>Total TVL</p>
+        <p 
+          className="text-xl font-display font-bold"
+          style={{ color: isDark ? '#ffffff' : '#111827' }}
+        >
+          {totalTvl}
+        </p>
       </div>
-
-      {/* Stats Grid */}
-      <div style={{ 
-        display: 'grid', 
-        gridTemplateColumns: 'repeat(2, 1fr)', 
-        gap: '12px',
-        marginBottom: '16px',
-        padding: '12px',
-        background: '#11141a',
-        borderRadius: '10px',
-      }}>
-        <div>
-          <div style={{ fontSize: '11px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>WETH Liquidity</div>
-          <div style={{ fontSize: '16px', fontWeight: 600, marginTop: '2px' }}>{formatAmount(wethBal, 18)} WETH</div>
-        </div>
-        <div>
-          <div style={{ fontSize: '11px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>USDC Earned</div>
-          <div style={{ fontSize: '16px', fontWeight: 600, marginTop: '2px', color: '#10b981' }}>{formatAmount(usdcBal, 6)} USDC</div>
-        </div>
-        <div>
-          <div style={{ fontSize: '11px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Total Volume</div>
-          <div style={{ fontSize: '14px', fontWeight: 500, marginTop: '2px' }}>{formatAmount(totalVolume, 6)} USDC</div>
-        </div>
-        <div>
-          <div style={{ fontSize: '11px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Trades</div>
-          <div style={{ fontSize: '14px', fontWeight: 500, marginTop: '2px' }}>{tradeCount.toString()}</div>
-        </div>
+      <div className="rounded-2xl p-4 backdrop-blur-sm" style={cardStyle}>
+        <p style={labelStyle}>24h Fees</p>
+        <p className="text-xl font-display font-bold text-green-500">{dailyFees}</p>
       </div>
-
-      {/* Action Buttons */}
-      {!action ? (
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <button 
-            className="btn-primary"
-            style={{ flex: 1, background: '#1a1f28', border: '1px solid #2a333c' }}
-            onClick={() => setAction('deposit')}
-          >
-            <ArrowDown size={16} style={{ display: 'inline', marginRight: '6px' }} />
-            Deposit
-          </button>
-          <button 
-            className="btn-primary"
-            style={{ flex: 1, background: '#1a1f28', border: '1px solid #2a333c' }}
-            onClick={() => setAction('withdraw')}
-          >
-            <ArrowUp size={16} style={{ display: 'inline', marginRight: '6px' }} />
-            Withdraw
-          </button>
-        </div>
-      ) : (
-        <div style={{ animation: 'slideUp 0.2s ease' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-            <input
-              type="text"
-              inputMode="decimal"
-              placeholder="0.0"
-              value={amount}
-              onChange={(e) => {
-                const val = e.target.value;
-                if (val === '' || /^\d*\.?\d*$/.test(val)) {
-                  setAmount(val);
-                }
-              }}
-              style={{
-                flex: 1,
-                padding: '12px 16px',
-                borderRadius: '10px',
-                border: '1px solid #2a333c',
-                background: '#11141a',
-                color: '#fff',
-                fontSize: '18px',
-                caretColor: '#ff6b35',
-              }}
-              autoFocus
-            />
-            <span style={{ color: '#6b7280', fontSize: '14px' }}>WETH</span>
-          </div>
-
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <button 
-              className="btn-primary"
-              style={{ flex: 1, background: '#2a333c' }}
-              onClick={() => { setAction(null); setAmount(''); }}
-            >
-              Cancel
-            </button>
-            
-            {action === 'deposit' && needsApproval() ? (
-              <button 
-                className="btn-primary"
-                style={{ flex: 1 }}
-                onClick={handleApprove}
-                disabled={isApproving || !amount}
-              >
-                {isApproving ? <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> : 'Approve'}
-              </button>
-            ) : (
-              <button 
-                className="btn-primary"
-                style={{ flex: 1 }}
-                onClick={action === 'deposit' ? handleDeposit : handleWithdraw}
-                disabled={!amount || parseFloat(amount) <= 0}
-              >
-                {action === 'deposit' ? 'Deposit' : 'Withdraw'}
-              </button>
-            )}
-          </div>
-
-          {action === 'deposit' && wethBalance ? (
-            <div style={{ marginTop: '8px', fontSize: '12px', color: '#6b7280', textAlign: 'right' }}>
-              Balance: {formatAmount(wethBalance, 18)} WETH
-              <button 
-                onClick={() => wethBalance && setAmount(formatUnits(wethBalance, 18))}
-                style={{ marginLeft: '8px', color: '#ff6b35', background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px' }}
-              >
-                MAX
-              </button>
-            </div>
-          ) : null}
-        </div>
-      )}
-
-      {/* Transaction Links */}
-      {(approveHash || depositHash || withdrawHash) && (
-        <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #2a333c' }}>
-          {approveHash && (
-            <a 
-              href={`https://sepolia.basescan.org/tx/${approveHash}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{ fontSize: '13px', color: '#ff6b35', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '4px' }}
-            >
-              View approval <ExternalLink size={12} />
-            </a>
-          )}
-          {depositHash && (
-            <a 
-              href={`https://sepolia.basescan.org/tx/${depositHash}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{ fontSize: '13px', color: '#10b981', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '4px' }}
-            >
-              View deposit <ExternalLink size={12} />
-            </a>
-          )}
-          {withdrawHash && (
-            <a 
-              href={`https://sepolia.basescan.org/tx/${withdrawHash}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{ fontSize: '13px', color: '#3b82f6', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '4px' }}
-            >
-              View withdrawal <ExternalLink size={12} />
-            </a>
-          )}
-        </div>
-      )}
+      <div className="rounded-2xl p-4 backdrop-blur-sm" style={cardStyle}>
+        <p style={labelStyle}>ETH Price</p>
+        <p className="text-xl font-display font-bold text-primary">${ethPrice.toLocaleString()}</p>
+      </div>
+      <div className="rounded-2xl p-4 backdrop-blur-sm" style={cardStyle}>
+        <p style={labelStyle}>Active Vaults</p>
+        <p 
+          className="text-xl font-display font-bold"
+          style={{ color: isDark ? '#ffffff' : '#111827' }}
+        >
+          3
+        </p>
+      </div>
     </div>
   );
 }
 
 export function Vaults() {
   const { address } = useAccount();
-  const { transactions, addTransaction, updateTransaction, clearHistory } = useTransactions(address);
+  const { isDark } = useTheme();
+  const { transactions, clearHistory } = useTransactions(address);
   const [showHistory, setShowHistory] = useState(false);
 
   return (
-    <main>
-      <div className="container">
-        <div className="hero">
-          <h1>Liquidity Vaults</h1>
-          <p>Deposit WETH to earn swap fees from TigerFlow traders</p>
-        </div>
-
-        <div className="stats">
-          <div className="stat">
-            <div className="stat-value">0.01 WETH</div>
-            <div className="stat-label">Total Liquidity</div>
-          </div>
-          <div className="stat">
-            <div className="stat-value">0.12%</div>
-            <div className="stat-label">Avg Fee</div>
-          </div>
-          <div className="stat" style={{ cursor: 'pointer' }} onClick={() => setShowHistory(true)}>
-            <div className="stat-value" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <History size={14} />
-              {transactions.length}
+    <main className="flex-grow flex flex-col items-center justify-start p-4 sm:p-8 relative z-10">
+      {/* Background Orbs */}
+      <div className="fixed inset-0 z-0 overflow-hidden pointer-events-none">
+        <div className="absolute -top-[10%] -left-[10%] w-[50%] h-[50%] bg-primary/20 rounded-full orb" />
+        <div className="absolute bottom-[5%] right-[-5%] w-[40%] h-[40%] bg-blue-500/10 rounded-full orb" />
+      </div>
+      
+      <div className="text-center mb-10 mt-6">
+        <h1 
+          className="text-4xl md:text-5xl font-display font-bold mb-4 tracking-tight"
+          style={{ color: isDark ? '#ffffff' : '#111827' }}
+        >
+          Liquidity Vaults
+        </h1>
+        <p 
+          className="text-lg font-medium"
+          style={{ color: isDark ? '#9ca3af' : '#4b5563' }}
+        >
+          Earn high-yield on your assets.
+        </p>
+      </div>
+      
+      <div className="w-full max-w-5xl relative">
+        <div 
+          className="relative rounded-3xl shadow-2xl overflow-hidden glass-panel"
+          style={{
+            backgroundColor: isDark ? '#2c2117' : '#ffffff',
+            border: `1px solid ${isDark ? 'rgba(61, 46, 32, 0.5)' : '#e5e7eb'}`
+          }}
+        >
+          <div className="p-6 sm:p-8">
+            {/* Desktop Header */}
+            <div 
+              className="hidden md:grid grid-cols-12 gap-4 pb-4 border-b px-4 text-xs font-bold uppercase tracking-widest"
+              style={{
+                borderColor: isDark ? 'rgba(61, 46, 32, 0.5)' : '#f3f4f6',
+                color: '#6b7280'
+              }}
+            >
+              <div className="col-span-4">Vault Name</div>
+              <div className="col-span-2 text-right">APY</div>
+              <div className="col-span-2 text-right">TVL</div>
+              <div className="col-span-2 text-right">My Deposit</div>
+              <div className="col-span-2 text-right">Action</div>
             </div>
-            <div className="stat-label">Transactions</div>
+
+            {/* Vault Rows */}
+            <div className="space-y-4 md:space-y-0 mt-4 md:mt-0">
+              {VAULTS.map((vault) => (
+                <VaultRow key={vault.id} vault={vault} />
+              ))}
+            </div>
           </div>
         </div>
 
-        <div style={{ maxWidth: '800px', margin: '0 auto' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))', gap: '16px' }}>
-            {VAULTS.map((vault) => (
-              <VaultCard 
-                key={vault.address} 
-                vault={vault} 
-                onAddTx={addTransaction}
-                onUpdateTx={updateTransaction}
-              />
-            ))}
-          </div>
-
-          <div className="card" style={{ marginTop: '24px', padding: '20px' }}>
-            <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <TrendingUp size={18} style={{ color: '#ff6b35' }} />
-              How it works
-            </h3>
-            <ol style={{ fontSize: '14px', color: '#9ca3af', paddingLeft: '20px', lineHeight: '1.8' }}>
-              <li>Deposit WETH into any vault to become a liquidity provider</li>
-              <li>When traders swap USDC→WETH, your vault may be used for optimal routing</li>
-              <li>Earn fees in USDC from every swap that uses your liquidity</li>
-              <li>Withdraw your WETH and earned USDC anytime - no lock-up period</li>
-            </ol>
-          </div>
-        </div>
+        {/* Stats Cards */}
+        <VaultStats />
       </div>
 
       <TransactionHistory 
