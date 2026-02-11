@@ -53,7 +53,7 @@ const VAULTS: VaultData[] = [
 function VaultRow({ vault }: { vault: VaultData }) {
   const { isDark } = useTheme();
   const { ethPrice } = useEthPrice();
-  
+
   // Read vault stats from contract
   const { data: vaultStats, isLoading: statsLoading } = useReadContract({
     address: vault.address as `0x${string}`,
@@ -64,17 +64,17 @@ function VaultRow({ vault }: { vault: VaultData }) {
   const [wethBal, , , totalFees, , , tradeCount] = vaultStats || [0n, 0n, 0n, 0n, 0n, 0n, 0n];
 
   // Calculate APY from actual fees
-  const apy = tradeCount > 0 && wethBal > 0n 
+  const apy = tradeCount > 0 && wethBal > 0n
     ? ((Number(totalFees) * 365 * 100) / Number(wethBal)).toFixed(1)
     : '0.0';
 
   // Format TVL using real ETH price
-  const tvl = wethBal > 0n 
+  const tvl = wethBal > 0n
     ? formatUsdValue(formatUnits(wethBal, 18), ethPrice)
     : '$0';
 
   return (
-    <div 
+    <div
       className="group rounded-2xl md:rounded-none p-4 md:px-4 md:py-6 md:grid md:grid-cols-12 md:gap-4 md:items-center border-b transition-all duration-200"
       style={{
         backgroundColor: isDark ? 'rgba(61, 46, 32, 0.5)' : '#f9fafb',
@@ -95,18 +95,18 @@ function VaultRow({ vault }: { vault: VaultData }) {
       <div className="col-span-4 flex items-center space-x-4 mb-4 md:mb-0">
         {/* Dual Token Icons */}
         <div className="relative w-12 h-12 flex-shrink-0">
-          <div 
+          <div
             className="w-8 h-8 absolute top-0 left-0 rounded-full flex items-center justify-center text-[10px] text-white font-black z-10 border-2"
-            style={{ 
+            style={{
               background: vault.tokenA.color,
               borderColor: isDark ? '#2c2117' : '#ffffff'
             }}
           >
             {vault.tokenA.symbol}
           </div>
-          <div 
+          <div
             className="w-8 h-8 absolute bottom-0 right-0 rounded-full flex items-center justify-center text-[10px] text-white font-black z-20 border-2"
-            style={{ 
+            style={{
               background: vault.tokenB.color,
               borderColor: isDark ? '#2c2117' : '#ffffff'
             }}
@@ -114,27 +114,27 @@ function VaultRow({ vault }: { vault: VaultData }) {
             {vault.tokenB.symbol}
           </div>
         </div>
-        
+
         <div>
-          <h3 
+          <h3
             className="font-display font-bold text-lg"
             style={{ color: isDark ? '#ffffff' : '#111827' }}
           >
             {vault.name}
           </h3>
           <div className="flex items-center space-x-2 mt-1">
-            <span 
+            <span
               className="text-xs font-medium px-2 py-0.5 rounded-md"
-              style={{ 
+              style={{
                 backgroundColor: isDark ? '#3d2e20' : '#e5e7eb',
                 color: isDark ? '#9ca3af' : '#6b7280'
               }}
             >
               {vault.type}
             </span>
-            <span 
+            <span
               className="text-xs font-medium px-2 py-0.5 rounded-md"
-              style={{ 
+              style={{
                 backgroundColor: isDark ? '#3d2e20' : '#e5e7eb',
                 color: isDark ? '#9ca3af' : '#6b7280'
               }}
@@ -146,7 +146,7 @@ function VaultRow({ vault }: { vault: VaultData }) {
       </div>
 
       {/* Mobile Stats */}
-      <div className="grid grid-cols-2 gap-4 md:hidden mb-4">
+      <div className="grid grid-cols-3 gap-4 md:hidden mb-4">
         <div>
           <p style={{ color: '#6b7280', fontSize: '12px', marginBottom: '4px' }}>APY</p>
           <p className="font-display font-bold text-lg text-primary">
@@ -155,7 +155,7 @@ function VaultRow({ vault }: { vault: VaultData }) {
         </div>
         <div>
           <p style={{ color: '#6b7280', fontSize: '12px', marginBottom: '4px' }}>TVL</p>
-          <p 
+          <p
             className="font-display font-bold text-lg"
             style={{ color: isDark ? '#ffffff' : '#111827' }}
           >
@@ -164,7 +164,7 @@ function VaultRow({ vault }: { vault: VaultData }) {
         </div>
         <div>
           <p style={{ color: '#6b7280', fontSize: '12px', marginBottom: '4px' }}>My Deposit</p>
-          <p 
+          <p
             className="font-display font-bold text-lg"
             style={{ color: isDark ? '#ffffff' : '#111827' }}
           >
@@ -185,7 +185,7 @@ function VaultRow({ vault }: { vault: VaultData }) {
         {statsLoading ? (
           <Loader2 size={16} className="animate-spin ml-auto" />
         ) : (
-          <span 
+          <span
             className="font-display font-bold text-base"
             style={{ color: isDark ? '#ffffff' : '#111827' }}
           >
@@ -194,7 +194,7 @@ function VaultRow({ vault }: { vault: VaultData }) {
         )}
       </div>
       <div className="hidden md:block col-span-2 text-right">
-        <span 
+        <span
           className="font-display font-bold text-base"
           style={{ color: isDark ? '#9ca3af' : '#6b7280' }}
         >
@@ -202,32 +202,45 @@ function VaultRow({ vault }: { vault: VaultData }) {
         </span>
       </div>
 
-      {/* Actions */}
+      {/* Actions — icon-only buttons */}
       <div className="col-span-2 flex items-center justify-end space-x-2">
         <a
           href={`https://sepolia.basescan.org/address/${vault.address}`}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex-1 md:flex-none py-2 px-4 rounded-xl text-sm font-bold transition-colors flex items-center justify-center gap-1 border"
+          title="Manage on BaseScan"
+          className="group w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-200 border hover:scale-110 active:scale-95"
           style={{
             backgroundColor: isDark ? '#3d2e20' : '#ffffff',
-            borderColor: isDark ? '#3d2e20' : '#e5e7eb',
-            color: isDark ? '#9ca3af' : '#6b7280'
+            borderColor: isDark ? 'rgba(242, 84, 27, 0.3)' : 'rgba(242, 84, 27, 0.2)',
+            color: isDark ? '#F2541B' : '#D9420D'
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.backgroundColor = isDark ? '#2c2117' : '#f9fafb';
+            e.currentTarget.style.borderColor = '#F2541B';
+            e.currentTarget.style.boxShadow = '0 4px 12px rgba(242, 84, 27, 0.2)';
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.backgroundColor = isDark ? '#3d2e20' : '#ffffff';
+            e.currentTarget.style.borderColor = isDark ? 'rgba(242, 84, 27, 0.3)' : 'rgba(242, 84, 27, 0.2)';
+            e.currentTarget.style.boxShadow = 'none';
           }}
         >
-          <ExternalLink size={14} />
-          <span className="hidden sm:inline">Manage</span>
+          <ExternalLink size={16} />
         </a>
-        <button 
-          className="flex-1 md:flex-none py-2 px-4 rounded-xl text-sm font-bold text-white bg-primary hover:bg-primary-hover shadow-lg shadow-orange-500/20 transition-all hover:scale-105 active:scale-95"
+        <button
+          title="Deposit WETH"
+          className="group w-10 h-10 rounded-xl flex items-center justify-center text-white transition-all duration-200 hover:scale-110 active:scale-95"
+          style={{
+            background: 'linear-gradient(135deg, #F2541B 0%, #D9420D 100%)',
+            boxShadow: '0 4px 12px rgba(242, 84, 27, 0.3)'
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.boxShadow = '0 6px 20px rgba(242, 84, 27, 0.4)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.boxShadow = '0 4px 12px rgba(242, 84, 27, 0.3)';
+          }}
         >
-          Deposit
+          <span className="text-lg font-bold">+</span>
         </button>
       </div>
     </div>
@@ -237,7 +250,7 @@ function VaultRow({ vault }: { vault: VaultData }) {
 function VaultStats() {
   const { isDark } = useTheme();
   const { ethPrice } = useEthPrice();
-  
+
   // Read all vault stats
   const { data: alphaStats } = useReadContract({
     address: VAULTS[0].address as `0x${string}`,
@@ -258,11 +271,11 @@ function VaultStats() {
   // Calculate total TVL
   const totalWeth = (alphaStats?.[0] || 0n) + (betaStats?.[0] || 0n) + (gammaStats?.[0] || 0n);
   const totalFees = (alphaStats?.[3] || 0n) + (betaStats?.[3] || 0n) + (gammaStats?.[3] || 0n);
-  
-  const totalTvl = totalWeth > 0n 
+
+  const totalTvl = totalWeth > 0n
     ? formatUsdValue(formatUnits(totalWeth, 18), ethPrice)
     : '$0';
-    
+
   const dailyFees = totalFees > 0n
     ? `$${(Number(formatUnits(totalFees, 6)) / 100).toFixed(2)}` // Approximate daily
     : '$0.00';
@@ -287,7 +300,7 @@ function VaultStats() {
     <div className="mt-8 grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
       <div className="rounded-2xl p-4 backdrop-blur-sm" style={cardStyle}>
         <p style={labelStyle}>Total TVL</p>
-        <p 
+        <p
           className="text-xl font-display font-bold"
           style={{ color: isDark ? '#ffffff' : '#111827' }}
         >
@@ -304,7 +317,7 @@ function VaultStats() {
       </div>
       <div className="rounded-2xl p-4 backdrop-blur-sm" style={cardStyle}>
         <p style={labelStyle}>Active Vaults</p>
-        <p 
+        <p
           className="text-xl font-display font-bold"
           style={{ color: isDark ? '#ffffff' : '#111827' }}
         >
@@ -328,24 +341,24 @@ export function Vaults() {
         <div className="absolute -top-[10%] -left-[10%] w-[50%] h-[50%] bg-primary/20 rounded-full orb" />
         <div className="absolute bottom-[5%] right-[-5%] w-[40%] h-[40%] bg-blue-500/10 rounded-full orb" />
       </div>
-      
+
       <div className="text-center mb-10 mt-6">
-        <h1 
+        <h1
           className="text-4xl md:text-5xl font-display font-bold mb-4 tracking-tight"
           style={{ color: isDark ? '#ffffff' : '#111827' }}
         >
           Liquidity Vaults
         </h1>
-        <p 
+        <p
           className="text-lg font-medium"
           style={{ color: isDark ? '#9ca3af' : '#4b5563' }}
         >
           Earn high-yield on your assets.
         </p>
       </div>
-      
+
       <div className="w-full max-w-5xl relative">
-        <div 
+        <div
           className="relative rounded-3xl shadow-2xl overflow-hidden glass-panel"
           style={{
             backgroundColor: isDark ? '#2c2117' : '#ffffff',
@@ -354,7 +367,7 @@ export function Vaults() {
         >
           <div className="p-6 sm:p-8">
             {/* Desktop Header */}
-            <div 
+            <div
               className="hidden md:grid grid-cols-12 gap-4 pb-4 border-b px-4 text-xs font-bold uppercase tracking-widest"
               style={{
                 borderColor: isDark ? 'rgba(61, 46, 32, 0.5)' : '#f3f4f6',
@@ -381,7 +394,7 @@ export function Vaults() {
         <VaultStats />
       </div>
 
-      <TransactionHistory 
+      <TransactionHistory
         transactions={transactions}
         onClear={clearHistory}
         isOpen={showHistory}

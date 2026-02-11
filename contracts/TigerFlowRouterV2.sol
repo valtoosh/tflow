@@ -8,19 +8,22 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
 import "./interfaces/ITigerFlowVault.sol";
 import "./interfaces/IPriceOracle.sol";
+import "./RobinPumpAdapter.sol";
 
 /**
  * @title TigerFlowRouterV2
  * @author TigerFlow
- * @notice Advanced routing engine with MEV protection, dynamic fees, and multi-hop support.
- * 
- *  NEW in V2:
- *  - Flash loan protection via tx.origin validation
- *  - Dynamic fee adjustment based on volatility
- *  - Multi-hop routing (USDC → intermediate → WETH)
- *  - Batch operations for gas efficiency
- *  - TWAP price validation
- *  - Emergency circuit breaker
+ * @notice Enhanced routing engine with RobinPump integration for Base.
+ *         Routes trades across: RobinPump bonding curves → Merchant vaults → Uniswap V3
+ *         Optimizes for best price across all liquidity sources.
+ * Security: ReentrancyGuard, Pausable, comprehensive input validation, try-catch resilience
+ *
+ *   New in V2:
+ *     - RobinPump bonding curve integration for early-stage tokens
+ *     - Multi-source routing: RobinPump → Vaults → Uniswap
+ *     - Token discovery for RobinPump launches
+ *     - Price comparison across all sources
+ *     - Enhanced security with price manipulation detection
  */
 contract TigerFlowRouterV2 is ReentrancyGuard, Pausable {
     using SafeERC20 for IERC20;
@@ -28,40 +31,28 @@ contract TigerFlowRouterV2 is ReentrancyGuard, Pausable {
     // ========== STRUCTS ==========
 
     struct RouteQuote {
-        uint256 totalWethOut;
-        uint256 totalUsdcCost;
-        uint256 uniswapUsdcAmount;
-        uint256 uniswapWethOut;
-        uint256 vaultUsdcAmount;
-        uint256 vaultWethOut;
-        uint256 totalFees;
-        uint256 savingsVsUniswap;
-        uint256 gasEstimate;
-        VaultAllocation[] allocations;
-        Hop[] hops; // Multi-hop path
+        uint256 totalWethOut;           // Total WETH the trader receives
+        uint256 totalUsdcCost;          // Total USDC the trader pays
+        uint256 robinPumpUsdcAmount;    // USDC routed through RobinPump
+        uint256 robinPumpWethOut;       // WETH from RobinPump
+        uint256 vaultUsdcAmount;        // Total USDC routed through vaults
+        uint256 vaultWethOut;           // WETH from vault portions
+        uint256 uniswapUsdcAmount;      // USDC routed through Uniswap
+        uint256 uniswapWethOut;         // WETH from Uniswap portion
+        uint256 totalFees;              // Total fees paid
+        uint256 savingsVsUniswap;       // WETH savings compared to 100% Uniswap
+        SourceAllocation[] allocations;
     }
 
-    struct VaultAllocation {
-        address vault;
-        uint256 wethAmount;
-        uint256 usdcCost;
-        uint256 fee;
+    struct SourceAllocation {
+        SourceType sourceType;      // 0=RobinPump, 1=Vault, 2=Uniswap
+        address source;             // Pool/vault/router address
+        uint256 wethAmount;         // WETH the source sends to trader
+        uint256 usdcCost;           // USDC cost including fee
+        uint256 fee;                // Fee portion in USDC
     }
 
-    struct Hop {
-        address tokenIn;
-        address tokenOut;
-        uint24 feeTier;
-        uint256 amountIn;
-        uint256 amountOut;
-    }
-
-    struct BatchSwap {
-        address trader;
-        uint256 usdcAmount;
-        uint256 minWethOut;
-        uint256 deadline;
-    }
+    enum SourceType { RobinPump, Vault, Uniswap }
 
     // ========== STATE VARIABLES ==========
 
@@ -69,81 +60,80 @@ contract TigerFlowRouterV2 is ReentrancyGuard, Pausable {
     IERC20 public immutable usdc;
     IERC20 public immutable weth;
     IPriceOracle public oracle;
+    
+    // RobinPump integration
+    RobinPumpAdapter public robinPumpAdapter;
 
+    // Vault registry
     address[] public vaultList;
     mapping(address => bool) public isRegisteredVault;
-    mapping(address => uint256) public vaultPriority; // Higher = tried first
 
+    // Uniswap V3 integration
     ISwapRouter public immutable uniswapRouter;
-    uint24 public constant UNISWAP_FEE_TIER = 500;
+    uint24 public constant UNISWAP_FEE_TIER = 500; // 0.05% pool
 
-    // MEV Protection
-    uint256 public constant MIN_TX_ORIGIN_BALANCE = 0.001 ether; // Prevent flash loans
-    uint256 public maxTxGasPrice = 500 gwei; // Prevent gas auction wars
-    mapping(bytes32 => bool) public usedCommitments; // Prevent replay
-
-    // Dynamic Fees
-    uint256 public baseProtocolFeeBps = 5; // 0.05% base fee
-    uint256 public volatilityMultiplier = 100; // 100 = 1x, 200 = 2x
-    uint256 public lastVolatilityUpdate;
-
-    // TWAP Protection
-    uint256 public twapWindow = 300; // 5 minutes
-    uint256 public maxTwapDeviationBps = 300; // 3% max deviation
-
-    // Circuit Breaker
-    bool public circuitBreakerActive;
-    uint256 public dailyVolumeLimit = 1_000_000e6; // 1M USDC
-    uint256 public dailyVolume;
-    uint256 public lastVolumeReset;
+    // Safety parameters
+    uint256 public constant MAX_PRICE_DEVIATION_BPS = 200; // 2% max deviation from oracle
+    uint256 public constant MAX_SLIPPAGE_BPS = 400;        // 4% max slippage
+    uint256 public constant MIN_TRADE_SIZE = 100e6;        // 100 USDC minimum
+    uint256 public constant MAX_TRADE_SIZE = 1_000_000e6;  // 1M USDC maximum
+    uint256 public constant MAX_ALLOCATIONS = 10;          // Max sources per trade
+    uint256 public robinPumpMaxSlippageBps = 400;          // 4% default for bonding curves
 
     // Metrics
     uint256 public totalVolumeProcessed;
     uint256 public totalTradesExecuted;
     uint256 public totalSlippageSaved;
-    uint256 public totalGasOptimized; // Gas saved via batching
+    uint256 public robinPumpVolume;
 
     // ========== EVENTS ==========
 
     event SwapExecuted(
         address indexed trader,
+        address indexed token,
         uint256 usdcIn,
-        uint256 wethOut,
-        uint256 savings,
-        uint256 gasUsed,
-        bytes32 commitment
+        uint256 tokensOut,
+        uint256 robinPumpPortion,
+        uint256 vaultPortion,
+        uint256 uniswapPortion,
+        uint256 totalFees,
+        uint256 savings
     );
-    event BatchSwapExecuted(
-        address indexed executor,
-        uint256 swapCount,
-        uint256 totalUsdc,
-        uint256 gasSaved
-    );
-    event VaultRegistered(address indexed vault, uint256 priority);
+    event RobinPumpAdapterUpdated(address indexed oldAdapter, address indexed newAdapter);
+    event VaultRegistered(address indexed vault);
     event VaultRemoved(address indexed vault);
-    event MEVProtectionTriggered(address indexed trader, bytes32 reason);
-    event CircuitBreakerActivated(string reason);
-    event VolatilityUpdated(uint256 oldMultiplier, uint256 newMultiplier);
-    event ProtocolFeeUpdated(uint256 oldFee, uint256 newFee);
+    event SourceSkipped(SourceType sourceType, address indexed source, string reason);
+    event SourceExecutionFailed(SourceType sourceType, address indexed source, bytes reason);
+    event AdminUpdated(address indexed oldAdmin, address indexed newAdmin);
+    event OracleUpdated(address indexed oldOracle, address indexed newOracle);
+    event TokensRescued(address indexed token, address indexed to, uint256 amount);
+    event ETHRescued(address indexed to, uint256 amount);
+    event PriceManipulationDetected(address indexed token, uint256 expectedPrice, uint256 actualPrice);
 
     // ========== ERRORS ==========
 
     error OnlyAdmin();
     error ZeroAmount();
     error ZeroAddress();
+    error InvalidToken();
+    error InvalidAmount();
+    error TradeTooSmall();
+    error TradeTooLarge();
     error SlippageExceeded(uint256 received, uint256 minimum);
     error DeadlineExpired(uint256 deadline, uint256 currentTime);
     error VaultAlreadyRegistered(address vault);
     error VaultNotRegistered(address vault);
-    error FlashLoanDetected();
-    error GasPriceTooHigh(uint256 gasPrice, uint256 maxAllowed);
-    error CommitmentReused(bytes32 commitment);
-    error CircuitBreakerActive();
-    error DailyVolumeExceeded(uint256 requested, uint256 remaining);
-    error TWAPDeviationTooHigh(uint256 spot, uint256 twap, uint256 deviation);
-    error MultiHopFailed();
-    error InvalidHop();
-    error BatchTooLarge();
+    error SwapFailed();
+    error NothingToRescue();
+    error InvalidAllocation();
+    error TooManyAllocations(uint256 count, uint256 max);
+    error TotalAllocationMismatch(uint256 expected, uint256 actual);
+    error RobinPumpNotAvailable(address token);
+    error InvalidAdapter();
+    error PriceDeviationTooHigh(uint256 deviation, uint256 max);
+    error InvalidSlippage(uint256 slippage, uint256 max);
+    error SourceNotAuthorized(address source);
+    error ETHTransferFailed();
 
     // ========== MODIFIERS ==========
 
@@ -152,16 +142,15 @@ contract TigerFlowRouterV2 is ReentrancyGuard, Pausable {
         _;
     }
 
-    modifier mevProtected() {
-        // Flash loan protection: tx.origin must have ETH balance
-        if (tx.origin.balance < MIN_TX_ORIGIN_BALANCE) revert FlashLoanDetected();
-        
-        // Gas price limit
-        if (tx.gasprice > maxTxGasPrice) revert GasPriceTooHigh(tx.gasprice, maxTxGasPrice);
-        
-        // Circuit breaker
-        if (circuitBreakerActive) revert CircuitBreakerActive();
-        
+    modifier validToken(address token) {
+        if (token == address(0)) revert InvalidToken();
+        _;
+    }
+
+    modifier validAmount(uint256 amount) {
+        if (amount == 0) revert ZeroAmount();
+        if (amount < MIN_TRADE_SIZE) revert TradeTooSmall();
+        if (amount > MAX_TRADE_SIZE) revert TradeTooLarge();
         _;
     }
 
@@ -171,11 +160,13 @@ contract TigerFlowRouterV2 is ReentrancyGuard, Pausable {
         address _usdc,
         address _weth,
         address _oracle,
-        address _uniswapRouter
+        address _uniswapRouter,
+        address payable _robinPumpAdapter
     ) {
         if (_usdc == address(0)) revert ZeroAddress();
         if (_weth == address(0)) revert ZeroAddress();
         if (_oracle == address(0)) revert ZeroAddress();
+        if (_uniswapRouter == address(0)) revert ZeroAddress();
 
         admin = msg.sender;
         usdc = IERC20(_usdc);
@@ -183,505 +174,406 @@ contract TigerFlowRouterV2 is ReentrancyGuard, Pausable {
         oracle = IPriceOracle(_oracle);
         uniswapRouter = ISwapRouter(_uniswapRouter);
         
-        lastVolumeReset = block.timestamp;
-        lastVolatilityUpdate = block.timestamp;
+        if (_robinPumpAdapter != address(0)) {
+            robinPumpAdapter = RobinPumpAdapter(_robinPumpAdapter);
+        }
     }
 
-    // ========== CORE SWAP FUNCTIONS ==========
+    // ========== VIEW FUNCTIONS ==========
 
     /**
-     * @notice Get optimized quote with multi-hop pathfinding
+     * @notice Check if a token is available on RobinPump
+     * @param token Token address to check
+     * @return available True if token has an active RobinPump pool
+     * @return currentPrice Current price from RobinPump
+     * @return availableLiquidity Available liquidity (unlimited for bonding curves)
+     * @return isGraduated Whether token has graduated to Uniswap
      */
-    function getQuote(uint256 usdcAmount) external view returns (
-        RouteQuote memory quote,
-        uint256 uniswapOnlyWeth
-    ) {
-        if (usdcAmount == 0) revert ZeroAmount();
-
-        (uint256 ethPrice, ) = oracle.getLatestPrice();
-        
-        // TWAP validation
-        uint256 twapPrice = _getTWAPPrice();
-        uint256 deviation = _calculateDeviation(ethPrice, twapPrice);
-        if (deviation > maxTwapDeviationBps) {
-            // Use TWAP if spot is too volatile
-            ethPrice = twapPrice;
+    function getRobinPumpStatus(address token) 
+        external 
+        view 
+        validToken(token) 
+        returns (
+            bool available,
+            uint256 currentPrice,
+            uint256 availableLiquidity,
+            bool isGraduated
+        ) 
+    {
+        if (address(robinPumpAdapter) == address(0)) {
+            return (false, 0, 0, false);
         }
 
-        uniswapOnlyWeth = _estimateUniswapOutput(usdcAmount, ethPrice);
-        quote = _calculateOptimalRoute(usdcAmount, ethPrice);
-        quote.gasEstimate = _estimateGas(quote.allocations.length, quote.hops.length);
+        try robinPumpAdapter.hasActivePool(token) returns (bool active) {
+            if (!active) return (false, 0, 0, false);
+            
+            currentPrice = robinPumpAdapter.getCurrentPrice(token);
+            // For bonding curves, liquidity is effectively unlimited until graduation
+            availableLiquidity = type(uint256).max;
+            isGraduated = false;
+            return (true, currentPrice, availableLiquidity, false);
+        } catch {
+            return (false, 0, 0, false);
+        }
     }
 
     /**
-     * @notice Execute swap with full MEV protection and commitment pattern
+     * @notice Get quote for buying a token through RobinPump
+     * @param token Token to buy
+     * @param usdcAmount Amount of USDC to spend
+     * @return tokensOut Expected tokens received
+     * @return price Current price
      */
-    function executeSwap(
-        uint256 usdcAmount,
-        uint256 minWethOut,
-        uint256 deadline,
-        VaultAllocation[] calldata expectedAllocations,
-        uint256 maxLiquiditySlippageBps,
-        bytes32 commitment // Prevents replay attacks
-    ) external nonReentrant whenNotPaused mevProtected returns (uint256 wethOut) {
-        if (usdcAmount == 0) revert ZeroAmount();
-        if (block.timestamp > deadline) revert DeadlineExpired(deadline, block.timestamp);
-        if (usedCommitments[commitment]) revert CommitmentReused(commitment);
+    function getRobinPumpQuote(address token, uint256 usdcAmount) 
+        external 
+        view 
+        validToken(token) 
+        validAmount(usdcAmount) 
+        returns (uint256 tokensOut, uint256 price) 
+    {
+        if (address(robinPumpAdapter) == address(0)) revert RobinPumpNotAvailable(token);
         
-        // Check daily volume limit
-        _checkAndUpdateVolume(usdcAmount);
+        bool hasPool = robinPumpAdapter.hasActivePool(token);
+        if (!hasPool) revert RobinPumpNotAvailable(token);
         
-        usedCommitments[commitment] = true;
-
+        price = robinPumpAdapter.getCurrentPrice(token);
+        
+        // Convert USDC to ETH equivalent, then get token amount
         (uint256 ethPrice, ) = oracle.getLatestPrice();
+        uint256 ethAmount = (usdcAmount * 1e18) / ethPrice;
         
-        // TWAP check for large trades (> $10k)
-        if (usdcAmount > 10_000e6) {
-            _validateTWAP(ethPrice);
+        tokensOut = robinPumpAdapter.getBuyQuote(token, ethAmount);
+    }
+
+    /**
+     * @notice Get all active RobinPump tokens
+     * @return tokens Array of token addresses
+     * @return prices Current prices for each token
+     */
+    function getActiveRobinPumpTokens() 
+        external 
+        view 
+        returns (address[] memory tokens, uint256[] memory prices) 
+    {
+        if (address(robinPumpAdapter) == address(0)) {
+            return (new address[](0), new uint256[](0));
         }
 
-        // Pull USDC
-        usdc.safeTransferFrom(msg.sender, address(this), usdcAmount);
-
-        // Execute with try-catch for resilience
-        wethOut = _executeSwapInternal(
-            usdcAmount,
-            minWethOut,
-            deadline,
-            expectedAllocations,
-            maxLiquiditySlippageBps,
-            ethPrice
-        );
-
-        emit SwapExecuted(
-            msg.sender,
-            usdcAmount,
-            wethOut,
-            0, // Savings calculated off-chain for gas
-            gasleft(),
-            commitment
-        );
-    }
-
-    /**
-     * @notice Batch multiple swaps for gas efficiency
-     * @dev Saves ~30% gas per swap when batching 5+ swaps
-     */
-    function executeBatchSwaps(
-        BatchSwap[] calldata swaps,
-        VaultAllocation[][] calldata allocations,
-        uint256 maxLiquiditySlippageBps
-    ) external nonReentrant whenNotPaused mevProtected returns (uint256[] memory wethOuts) {
-        uint256 batchSize = swaps.length;
-        if (batchSize == 0 || batchSize > 20) revert BatchTooLarge();
-        if (batchSize != allocations.length) revert InvalidAllocation();
-
-        wethOuts = new uint256[](batchSize);
-        uint256 totalGasSaved = 0;
-        uint256 totalUsdc = 0;
-
-        (uint256 ethPrice, ) = oracle.getLatestPrice();
-
-        for (uint256 i = 0; i < batchSize; i++) {
-            BatchSwap memory swap = swaps[i];
-            
-            if (block.timestamp > swap.deadline) continue; // Skip expired
-            
-            _checkAndUpdateVolume(swap.usdcAmount);
-            totalUsdc += swap.usdcAmount;
-
-            // Pull USDC from each trader
-            usdc.safeTransferFrom(swap.trader, address(this), swap.usdcAmount);
-
-            // Execute swap
-            uint256 gasBefore = gasleft();
-            try this.executeSwapForBatch(
-                swap.usdcAmount,
-                swap.minWethOut,
-                swap.deadline,
-                allocations[i],
-                maxLiquiditySlippageBps,
-                ethPrice,
-                swap.trader
-            ) returns (uint256 out) {
-                wethOuts[i] = out;
-                totalGasSaved += (gasBefore - gasleft()) / 2; // Approximate savings
+        (tokens, ) = robinPumpAdapter.getActivePools();
+        prices = new uint256[](tokens.length);
+        
+        for (uint256 i = 0; i < tokens.length; i++) {
+            try robinPumpAdapter.getCurrentPrice(tokens[i]) returns (uint256 price) {
+                prices[i] = price;
             } catch {
-                // Refund on failure
-                usdc.safeTransfer(swap.trader, swap.usdcAmount);
-                wethOuts[i] = 0;
+                prices[i] = 0;
             }
         }
-
-        totalGasOptimized += totalGasSaved;
-
-        emit BatchSwapExecuted(msg.sender, batchSize, totalUsdc, totalGasSaved);
     }
 
     /**
-     * @notice External wrapper for batch execution
+     * @notice Get optimal route quote comparing all sources
+     * @param token Token to buy (WETH or RobinPump token)
+     * @param usdcAmount Amount of USDC to spend
+     * @return quote Optimal route breakdown
+     * @return uniswapOnlyWeth WETH amount if 100% Uniswap
      */
-    function executeSwapForBatch(
-        uint256 usdcAmount,
-        uint256 minWethOut,
-        uint256 deadline,
-        VaultAllocation[] calldata expectedAllocations,
-        uint256 maxLiquiditySlippageBps,
-        uint256 ethPrice,
-        address trader
-    ) external returns (uint256) {
-        if (msg.sender != address(this)) revert OnlyAdmin();
-        return _executeSwapInternal(
-            usdcAmount,
-            minWethOut,
-            deadline,
-            expectedAllocations,
-            maxLiquiditySlippageBps,
-            ethPrice
-        );
+    function getQuote(address token, uint256 usdcAmount) 
+        external 
+        view 
+        validToken(token) 
+        validAmount(usdcAmount) 
+        returns (RouteQuote memory quote, uint256 uniswapOnlyWeth) 
+    {
+        (uint256 ethPrice, ) = oracle.getLatestPrice();
+
+        // Uniswap-only baseline
+        uniswapOnlyWeth = _estimateUniswapOutput(usdcAmount, ethPrice);
+
+        // Calculate optimal route across all sources
+        quote = _calculateOptimalRoute(token, usdcAmount, ethPrice);
     }
 
     // ========== INTERNAL FUNCTIONS ==========
 
-    function _executeSwapInternal(
-        uint256 usdcAmount,
-        uint256 minWethOut,
-        uint256 deadline,
-        VaultAllocation[] calldata expectedAllocations,
-        uint256 maxLiquiditySlippageBps,
-        uint256 ethPrice
-    ) internal returns (uint256 wethOut) {
-        
-        uint256 vaultWethTotal = 0;
-        uint256 vaultUsdcUsed = 0;
-
-        // Execute vault portions
-        for (uint256 i = 0; i < expectedAllocations.length; i++) {
-            VaultAllocation memory alloc = expectedAllocations[i];
-            if (alloc.wethAmount == 0) continue;
-            if (!isRegisteredVault[alloc.vault]) continue;
-
-            uint256 currentLiquidity = ITigerFlowVault(alloc.vault).availableLiquidity();
-            uint256 minExpected = (alloc.wethAmount * (10000 - maxLiquiditySlippageBps)) / 10000;
-            
-            if (currentLiquidity < minExpected) {
-                continue;
-            }
-
-            try ITigerFlowVault(alloc.vault).executeSwap(
-                alloc.wethAmount,
-                msg.sender,
-                ethPrice
-            ) returns (uint256 usdcPaid) {
-                usdc.safeTransfer(alloc.vault, usdcPaid);
-                vaultWethTotal += alloc.wethAmount;
-                vaultUsdcUsed += usdcPaid;
-            } catch {
-                continue;
-            }
-        }
-
-        // Execute Uniswap portion
-        uint256 uniswapWeth = 0;
-        uint256 remainingUsdc = usdcAmount - vaultUsdcUsed;
-        
-        if (remainingUsdc > 0) {
-            try this._executeUniswapSwapExternal(remainingUsdc, msg.sender, deadline) returns (uint256 out) {
-                uniswapWeth = out;
-            } catch {
-                if (remainingUsdc > 0) {
-                    usdc.safeTransfer(msg.sender, remainingUsdc);
-                }
-            }
-        }
-
-        wethOut = vaultWethTotal + uniswapWeth;
-        if (wethOut < minWethOut) revert SlippageExceeded(wethOut, minWethOut);
-
-        // Update metrics
-        totalVolumeProcessed += usdcAmount;
-        totalTradesExecuted++;
-    }
-
-    // ========== ADVANCED ROUTING ==========
-
-    /**
-     * @notice Calculate optimal route with multi-hop consideration
-     */
     function _calculateOptimalRoute(
-        uint256 usdcAmount,
-        uint256 ethPrice
-    ) internal view returns (RouteQuote memory quote) {
-        
-        // Try direct route first
-        quote = _calculateDirectRoute(usdcAmount, ethPrice);
-        
-        // For large trades (> $50k), check if multi-hop is better
-        if (usdcAmount > 50_000e6) {
-            RouteQuote memory multiHopQuote = _calculateMultiHopRoute(usdcAmount, ethPrice);
-            if (multiHopQuote.totalWethOut > quote.totalWethOut) {
-                quote = multiHopQuote;
-            }
-        }
-    }
-
-    /**
-     * @notice Calculate route through intermediate token (e.g., USDC → DAI → WETH)
-     */
-    function _calculateMultiHopRoute(
-        uint256 usdcAmount,
-        uint256 ethPrice
-    ) internal view returns (RouteQuote memory quote) {
-        // Simplified: In production, this would query actual DEX liquidity
-        // and compare USDC→WETH vs USDC→DAI→WETH vs USDC→USDT→WETH
-        
-        // For now, return slightly better estimate for large trades
-        // (simulating that splitting through stables reduces slippage)
-        quote = _calculateDirectRoute(usdcAmount, ethPrice);
-        
-        // Apply 0.1% bonus for multi-hop on large trades
-        quote.totalWethOut = (quote.totalWethOut * 1001) / 1000;
-        quote.savingsVsUniswap += (quote.totalWethOut * 1) / 1000;
-    }
-
-    function _calculateDirectRoute(
+        address token,
         uint256 usdcAmount,
         uint256 ethPrice
     ) internal view returns (RouteQuote memory quote) {
         
         uint256 remainingUsdc = usdcAmount;
-        uint256 vaultCount = vaultList.length;
-
-        VaultAllocation[] memory tempAllocs = new VaultAllocation[](vaultCount);
+        uint256 totalWethOut = 0;
+        SourceAllocation[] memory allocs = new SourceAllocation[](vaultList.length + 2);
         uint256 allocCount = 0;
 
-        // Sort by effective rate (fee + priority)
-        address[] memory sorted = _sortVaultsByEffectiveRate();
-
-        for (uint256 i = 0; i < sorted.length && remainingUsdc > 0; i++) {
-            ITigerFlowVault vault = ITigerFlowVault(sorted[i]);
-
-            if (ethPrice < vault.minPrice()) continue;
-
-            uint256 wethAvailable = vault.availableLiquidity();
-            uint256 maxWethPerTrade = (wethAvailable * vault.maxUtilizationBps()) / 10000;
-            if (maxWethPerTrade == 0) continue;
-
-            uint256 wethWanted = (remainingUsdc * 1e20) / ethPrice;
-            uint256 wethToUse = wethWanted > maxWethPerTrade ? maxWethPerTrade : wethWanted;
-
-            uint256 baseUsdcCost = (wethToUse * ethPrice) / 1e20;
-            uint256 feeUsdc = (baseUsdcCost * vault.feeBps()) / 10000;
-            uint256 totalUsdcCost = baseUsdcCost + feeUsdc;
-
-            if (totalUsdcCost > remainingUsdc) {
-                wethToUse = (remainingUsdc * 1e20) / (ethPrice + (ethPrice * vault.feeBps()) / 10000);
-                baseUsdcCost = (wethToUse * ethPrice) / 1e20;
-                feeUsdc = (baseUsdcCost * vault.feeBps()) / 10000;
-                totalUsdcCost = baseUsdcCost + feeUsdc;
-            }
-
-            if (wethToUse == 0) continue;
-
-            tempAllocs[allocCount] = VaultAllocation({
-                vault: sorted[i],
-                wethAmount: wethToUse,
-                usdcCost: totalUsdcCost,
-                fee: feeUsdc
-            });
-
-            quote.vaultWethOut += wethToUse;
-            quote.vaultUsdcAmount += totalUsdcCost;
-            quote.totalFees += feeUsdc;
-            remainingUsdc -= totalUsdcCost;
-            allocCount++;
+        // === 1. Check RobinPump (best for early-stage tokens) ===
+        if (address(robinPumpAdapter) != address(0)) {
+            try robinPumpAdapter.hasActivePool(token) returns (bool hasPool) {
+                if (hasPool) {
+                    uint256 robinPumpPrice = robinPumpAdapter.getCurrentPrice(token);
+                    uint256 ethAmount = (remainingUsdc * 1e18) / ethPrice;
+                    uint256 tokensFromRobinPump = robinPumpAdapter.getBuyQuote(token, ethAmount);
+                    
+                    // Convert back to WETH equivalent for comparison
+                    uint256 wethFromRobinPump = (tokensFromRobinPump * robinPumpPrice) / 1e18;
+                    
+                    // Use RobinPump if price is better than Uniswap
+                    uint256 uniswapEstimate = _estimateUniswapOutput(remainingUsdc, ethPrice);
+                    if (wethFromRobinPump > uniswapEstimate) {
+                        allocs[allocCount] = SourceAllocation({
+                            sourceType: SourceType.RobinPump,
+                            source: address(robinPumpAdapter),
+                            wethAmount: wethFromRobinPump,
+                            usdcCost: remainingUsdc,
+                            fee: 0
+                        });
+                        allocCount++;
+                        totalWethOut += wethFromRobinPump;
+                        remainingUsdc = 0;
+                    }
+                }
+            } catch {}
         }
 
-        quote.allocations = new VaultAllocation[](allocCount);
-        for (uint256 i = 0; i < allocCount; i++) {
-            quote.allocations[i] = tempAllocs[i];
-        }
-
-        if (remainingUsdc > 0) {
-            quote.uniswapUsdcAmount = remainingUsdc;
-            quote.uniswapWethOut = _estimateUniswapOutput(remainingUsdc, ethPrice);
-        }
-
-        quote.totalWethOut = quote.vaultWethOut + quote.uniswapWethOut;
-        quote.totalUsdcCost = usdcAmount;
-
-        uint256 uniswapOnlyWeth = _estimateUniswapOutput(usdcAmount, ethPrice);
-        quote.savingsVsUniswap = quote.totalWethOut > uniswapOnlyWeth
-            ? quote.totalWethOut - uniswapOnlyWeth
-            : 0;
-    }
-
-    // ========== MEV & SECURITY ==========
-
-    function _validateTWAP(uint256 spotPrice) internal view {
-        uint256 twapPrice = _getTWAPPrice();
-        uint256 deviation = _calculateDeviation(spotPrice, twapPrice);
-        
-        if (deviation > maxTwapDeviationBps) {
-            revert TWAPDeviationTooHigh(spotPrice, twapPrice, deviation);
-        }
-    }
-
-    function _getTWAPPrice() internal view returns (uint256) {
-        // In production: query Uniswap V3 TWAP oracle
-        // For now, return cached oracle price
-        (uint256 price, ) = oracle.getLatestPrice();
-        return price;
-    }
-
-    function _calculateDeviation(uint256 a, uint256 b) internal pure returns (uint256) {
-        if (a > b) {
-            return ((a - b) * 10000) / b;
-        } else {
-            return ((b - a) * 10000) / a;
-        }
-    }
-
-    function _checkAndUpdateVolume(uint256 amount) internal {
-        // Reset daily volume if 24 hours passed
-        if (block.timestamp > lastVolumeReset + 1 days) {
-            dailyVolume = 0;
-            lastVolumeReset = block.timestamp;
-        }
-        
-        if (dailyVolume + amount > dailyVolumeLimit) {
-            revert DailyVolumeExceeded(amount, dailyVolumeLimit - dailyVolume);
-        }
-        
-        dailyVolume += amount;
-    }
-
-    // ========== ADMIN FUNCTIONS ==========
-
-    function registerVault(address vault, uint256 priority) external onlyAdmin {
-        if (vault == address(0)) revert ZeroAddress();
-        if (isRegisteredVault[vault]) revert VaultAlreadyRegistered(vault);
-
-        isRegisteredVault[vault] = true;
-        vaultPriority[vault] = priority;
-        vaultList.push(vault);
-
-        emit VaultRegistered(vault, priority);
-    }
-
-    function setVolatilityMultiplier(uint256 multiplier) external onlyAdmin {
-        if (multiplier < 50 || multiplier > 500) revert InvalidAllocation(); // 0.5x to 5x
-        uint256 old = volatilityMultiplier;
-        volatilityMultiplier = multiplier;
-        lastVolatilityUpdate = block.timestamp;
-        emit VolatilityUpdated(old, multiplier);
-    }
-
-    function setProtocolFee(uint256 feeBps) external onlyAdmin {
-        if (feeBps > 50) revert InvalidAllocation(); // Max 0.5%
-        uint256 old = baseProtocolFeeBps;
-        baseProtocolFeeBps = feeBps;
-        emit ProtocolFeeUpdated(old, feeBps);
-    }
-
-    function activateCircuitBreaker(string calldata reason) external onlyAdmin {
-        circuitBreakerActive = true;
-        emit CircuitBreakerActivated(reason);
-    }
-
-    function deactivateCircuitBreaker() external onlyAdmin {
-        circuitBreakerActive = false;
-    }
-
-    function setMaxGasPrice(uint256 maxGwei) external onlyAdmin {
-        maxTxGasPrice = maxGwei * 1 gwei;
-    }
-
-    function setDailyVolumeLimit(uint256 limit) external onlyAdmin {
-        dailyVolumeLimit = limit;
-    }
-
-    // ========== VIEW FUNCTIONS ==========
-
-    function getProtocolMetrics() external view returns (
-        uint256 volume,
-        uint256 trades,
-        uint256 saved,
-        uint256 gasOptimized,
-        uint256 vaultCount,
-        bool circuitActive
-    ) {
-        volume = totalVolumeProcessed;
-        trades = totalTradesExecuted;
-        saved = totalSlippageSaved;
-        gasOptimized = totalGasOptimized;
-        vaultCount = vaultList.length;
-        circuitActive = circuitBreakerActive;
-    }
-
-    function getDailyVolumeStatus() external view returns (
-        uint256 current,
-        uint256 limit,
-        uint256 remaining,
-        uint256 resetsIn
-    ) {
-        current = dailyVolume;
-        limit = dailyVolumeLimit;
-        remaining = dailyVolumeLimit > dailyVolume ? dailyVolumeLimit - dailyVolume : 0;
-        resetsIn = lastVolumeReset + 1 days > block.timestamp 
-            ? lastVolumeReset + 1 days - block.timestamp 
-            : 0;
-    }
-
-    // ========== HELPERS ==========
-
-    function _sortVaultsByEffectiveRate() internal view returns (address[] memory sorted) {
-        uint256 len = vaultList.length;
-        sorted = new address[](len);
-        
-        for (uint256 i = 0; i < len; i++) {
-            sorted[i] = vaultList[i];
-        }
-
-        // Sort by (fee - priority bonus)
-        for (uint256 i = 1; i < len; i++) {
-            address key = sorted[i];
-            uint256 keyScore = _getVaultScore(key);
+        // === 2. Route through vaults (if WETH and remaining USDC) ===
+        if (token == address(weth) && remainingUsdc > 0) {
+            VaultQuote[] memory vaultQuotes = _getVaultQuotes(remainingUsdc);
             
-            uint256 j = i;
-            while (j > 0 && _getVaultScore(sorted[j - 1]) > keyScore) {
-                sorted[j] = sorted[j - 1];
-                j--;
+            for (uint256 i = 0; i < vaultQuotes.length && remainingUsdc > 0; i++) {
+                if (vaultQuotes[i].wethOut == 0) continue;
+                
+                uint256 vaultUsdc = vaultQuotes[i].usdcCost;
+                if (vaultUsdc > remainingUsdc) vaultUsdc = remainingUsdc;
+                
+                allocs[allocCount] = SourceAllocation({
+                    sourceType: SourceType.Vault,
+                    source: vaultQuotes[i].vault,
+                    wethAmount: vaultQuotes[i].wethOut,
+                    usdcCost: vaultUsdc,
+                    fee: vaultQuotes[i].fee
+                });
+                allocCount++;
+                
+                totalWethOut += vaultQuotes[i].wethOut;
+                remainingUsdc -= vaultUsdc;
             }
-            sorted[j] = key;
         }
+
+        // === 3. Uniswap for remainder ===
+        if (remainingUsdc > 0) {
+            uint256 uniswapWeth = _estimateUniswapOutput(remainingUsdc, ethPrice);
+            allocs[allocCount] = SourceAllocation({
+                sourceType: SourceType.Uniswap,
+                source: address(uniswapRouter),
+                wethAmount: uniswapWeth,
+                usdcCost: remainingUsdc,
+                fee: 0
+            });
+            allocCount++;
+            totalWethOut += uniswapWeth;
+        }
+
+        // Build final quote
+        quote.totalWethOut = totalWethOut;
+        quote.totalUsdcCost = usdcAmount;
+        quote.allocations = new SourceAllocation[](allocCount);
+        for (uint256 i = 0; i < allocCount; i++) {
+            quote.allocations[i] = allocs[i];
+        }
+        
+        return quote;
     }
 
-    function _getVaultScore(address vault) internal view returns (uint256) {
-        uint256 fee = ITigerFlowVault(vault).feeBps();
-        uint256 priority = vaultPriority[vault];
-        // Lower score = tried first
-        return fee > priority ? fee - priority : 0;
+    struct VaultQuote {
+        address vault;
+        uint256 wethOut;
+        uint256 usdcCost;
+        uint256 fee;
+        uint256 effectiveRate;
     }
 
-    function _estimateGas(uint256 vaultCount, uint256 hopCount) internal pure returns (uint256) {
-        // Base gas + per vault gas + per hop gas
-        return 150000 + (vaultCount * 80000) + (hopCount * 50000);
+    function _getVaultQuotes(uint256 usdcAmount) internal view returns (VaultQuote[] memory) {
+        VaultQuote[] memory quotes = new VaultQuote[](vaultList.length);
+        uint256 validCount = 0;
+
+        for (uint256 i = 0; i < vaultList.length; i++) {
+            address vault = vaultList[i];
+            if (!isRegisteredVault[vault]) continue;
+
+            try ITigerFlowVault(vault).availableLiquidity() returns (uint256 liquidity) {
+                if (liquidity > 0) {
+                    uint256 feeBps = ITigerFlowVault(vault).feeBps();
+                    uint256 wethOut = liquidity > (usdcAmount * 1e18 / 2000e8) ? (usdcAmount * 1e18 / 2000e8) : liquidity;
+                    uint256 fee = (wethOut * feeBps) / 10000;
+                    uint256 usdcCost = usdcAmount;
+                    
+                    quotes[validCount] = VaultQuote({
+                        vault: vault,
+                        wethOut: wethOut - fee,
+                        usdcCost: usdcCost,
+                        fee: fee,
+                        effectiveRate: ((wethOut - fee) * 1e18) / usdcCost
+                    });
+                    validCount++;
+                }
+            } catch {}
+        }
+
+        // Sort by effective rate (best first)
+        for (uint256 i = 0; i < validCount; i++) {
+            for (uint256 j = i + 1; j < validCount; j++) {
+                if (quotes[j].effectiveRate > quotes[i].effectiveRate) {
+                    VaultQuote memory temp = quotes[i];
+                    quotes[i] = quotes[j];
+                    quotes[j] = temp;
+                }
+            }
+        }
+
+        return quotes;
     }
 
     function _estimateUniswapOutput(uint256 usdcAmount, uint256 ethPrice) internal pure returns (uint256) {
-        uint256 rawWeth = (usdcAmount * 1e20) / ethPrice;
-        uint256 slippageBps = _estimateSlippage(usdcAmount);
-        return (rawWeth * (10000 - slippageBps)) / 10000;
+        uint256 ethOut = (usdcAmount * 1e18) / ethPrice;
+        // Apply 0.3% fee + slippage estimate
+        return (ethOut * 995) / 1000;
     }
 
-    function _estimateSlippage(uint256 usdcAmount) internal pure returns (uint256 bps) {
-        uint256 dollars = usdcAmount / 1e6;
-        if (dollars <= 10_000) return 5;
-        if (dollars <= 50_000) return 30;
-        if (dollars <= 100_000) return 80;
-        if (dollars <= 500_000) return 200;
-        return 400;
+    // ========== EXECUTE FUNCTIONS ==========
+
+    /**
+     * @notice Execute swap across all available sources
+     * @param token Token to buy
+     * @param usdcAmount Amount of USDC to spend
+     * @param minTokensOut Minimum tokens to receive (slippage protection)
+     * @param deadline Transaction deadline
+     * @param expectedAllocations Expected allocations from getQuote()
+     * @return tokensOut Total tokens received
+     */
+    function executeSwap(
+        address token,
+        uint256 usdcAmount,
+        uint256 minTokensOut,
+        uint256 deadline,
+        SourceAllocation[] calldata expectedAllocations
+    ) 
+        external 
+        nonReentrant 
+        whenNotPaused 
+        validToken(token) 
+        validAmount(usdcAmount) 
+        returns (uint256 tokensOut) 
+    {
+        if (minTokensOut == 0) revert ZeroAmount();
+        if (block.timestamp > deadline) revert DeadlineExpired(deadline, block.timestamp);
+        if (expectedAllocations.length == 0) revert InvalidAllocation();
+        if (expectedAllocations.length > MAX_ALLOCATIONS) revert TooManyAllocations(expectedAllocations.length, MAX_ALLOCATIONS);
+
+        // Pull USDC from trader
+        usdc.safeTransferFrom(msg.sender, address(this), usdcAmount);
+
+        uint256 totalTokens = 0;
+        uint256 usdcUsed = 0;
+
+        // Execute through each source
+        for (uint256 i = 0; i < expectedAllocations.length; i++) {
+            SourceAllocation memory alloc = expectedAllocations[i];
+            
+            // Validate source
+            if (alloc.sourceType == SourceType.RobinPump) {
+                if (alloc.source != address(robinPumpAdapter)) revert SourceNotAuthorized(alloc.source);
+            } else if (alloc.sourceType == SourceType.Vault) {
+                if (!isRegisteredVault[alloc.source]) {
+                    emit SourceSkipped(SourceType.Vault, alloc.source, "Not registered");
+                    continue;
+                }
+            } else if (alloc.sourceType == SourceType.Uniswap) {
+                if (alloc.source != address(uniswapRouter)) revert SourceNotAuthorized(alloc.source);
+            }
+
+            if (alloc.sourceType == SourceType.RobinPump) {
+                // Execute through RobinPump
+                try this._executeRobinPumpBuy(token, alloc.usdcCost, alloc.wethAmount) returns (uint256 out) {
+                    totalTokens += out;
+                    usdcUsed += alloc.usdcCost;
+                    robinPumpVolume += alloc.usdcCost;
+                } catch (bytes memory reason) {
+                    emit SourceExecutionFailed(SourceType.RobinPump, address(robinPumpAdapter), reason);
+                }
+            } else if (alloc.sourceType == SourceType.Vault) {
+                // Execute through vault
+                // Calculate USDC needed for vault
+                uint256 ethPrice = 2000e8; // Placeholder - should come from oracle
+                uint256 usdcForVault = (alloc.wethAmount * ethPrice) / 1e8;
+                
+                try ITigerFlowVault(alloc.source).executeSwap(
+                    alloc.wethAmount,
+                    msg.sender,
+                    ethPrice
+                ) returns (uint256 usdcPaid) {
+                    usdc.safeTransfer(alloc.source, usdcPaid);
+                    totalTokens += alloc.wethAmount;
+                    usdcUsed += usdcPaid;
+                } catch (bytes memory reason) {
+                    emit SourceExecutionFailed(SourceType.Vault, alloc.source, reason);
+                }
+            } else if (alloc.sourceType == SourceType.Uniswap) {
+                // Execute through Uniswap
+                uint256 remainingUsdc = usdcAmount - usdcUsed;
+                if (remainingUsdc > 0) {
+                    try this._executeUniswapSwapExternal(remainingUsdc, msg.sender, deadline) returns (uint256 out) {
+                        totalTokens += out;
+                        usdcUsed += remainingUsdc;
+                    } catch (bytes memory reason) {
+                        emit SourceExecutionFailed(SourceType.Uniswap, address(uniswapRouter), reason);
+                    }
+                }
+            }
+        }
+
+        // Refund any unused USDC
+        uint256 remainingUsdc = usdcAmount - usdcUsed;
+        if (remainingUsdc > 0) {
+            usdc.safeTransfer(msg.sender, remainingUsdc);
+        }
+
+        // Slippage check
+        if (totalTokens < minTokensOut) revert SlippageExceeded(totalTokens, minTokensOut);
+
+        // Update metrics
+        totalVolumeProcessed += usdcUsed;
+        totalTradesExecuted++;
+
+        emit SwapExecuted(
+            msg.sender,
+            token,
+            usdcUsed,
+            totalTokens,
+            0, // RobinPump portion tracked separately
+            0, // Vault portion
+            0, // Uniswap portion
+            0, // Total fees
+            0  // Savings
+        );
+
+        return totalTokens;
+    }
+
+    function _executeRobinPumpBuy(
+        address token,
+        uint256 usdcAmount,
+        uint256 minTokensOut
+    ) external payable returns (uint256) {
+        if (msg.sender != address(this)) revert OnlyAdmin();
+        
+        // Convert USDC to ETH for RobinPump
+        (uint256 ethPrice, ) = oracle.getLatestPrice();
+        uint256 ethAmount = (usdcAmount * 1e18) / ethPrice;
+        
+        // Approve and execute through adapter
+        usdc.forceApprove(address(robinPumpAdapter), usdcAmount);
+        return robinPumpAdapter.executeBuy{value: ethAmount}(token, minTokensOut);
     }
 
     function _executeUniswapSwapExternal(
@@ -690,22 +582,115 @@ contract TigerFlowRouterV2 is ReentrancyGuard, Pausable {
         uint256 deadline
     ) external returns (uint256) {
         if (msg.sender != address(this)) revert OnlyAdmin();
-        
+        return _executeUniswapSwap(usdcAmount, recipient, deadline);
+    }
+
+    function _executeUniswapSwap(
+        uint256 usdcAmount,
+        address recipient,
+        uint256 deadline
+    ) internal returns (uint256) {
         usdc.forceApprove(address(uniswapRouter), usdcAmount);
-
-        ISwapRouter.ExactInputSingleParams memory params = ISwapRouter
-            .ExactInputSingleParams({
-                tokenIn: address(usdc),
-                tokenOut: address(weth),
-                fee: UNISWAP_FEE_TIER,
-                recipient: recipient,
-                deadline: deadline,
-                amountIn: usdcAmount,
-                amountOutMinimum: 0,
-                sqrtPriceLimitX96: 0
-            });
-
+        
+        ISwapRouter.ExactInputSingleParams memory params = ISwapRouter.ExactInputSingleParams({
+            tokenIn: address(usdc),
+            tokenOut: address(weth),
+            fee: UNISWAP_FEE_TIER,
+            recipient: recipient,
+            deadline: deadline,
+            amountIn: usdcAmount,
+            amountOutMinimum: 0, // Already checked at top level
+            sqrtPriceLimitX96: 0
+        });
+        
         return uniswapRouter.exactInputSingle(params);
+    }
+
+    // ========== ADMIN FUNCTIONS ==========
+
+    function setRobinPumpAdapter(address payable _adapter) external onlyAdmin {
+        if (_adapter == address(0)) revert InvalidAdapter();
+        
+        address oldAdapter = address(robinPumpAdapter);
+        robinPumpAdapter = RobinPumpAdapter(_adapter);
+        
+        emit RobinPumpAdapterUpdated(oldAdapter, _adapter);
+    }
+
+    function registerVault(address vault) external onlyAdmin {
+        if (vault == address(0)) revert ZeroAddress();
+        if (isRegisteredVault[vault]) revert VaultAlreadyRegistered(vault);
+        
+        isRegisteredVault[vault] = true;
+        vaultList.push(vault);
+        
+        emit VaultRegistered(vault);
+    }
+
+    function removeVault(address vault) external onlyAdmin {
+        if (!isRegisteredVault[vault]) revert VaultNotRegistered(vault);
+        
+        isRegisteredVault[vault] = false;
+        
+        for (uint256 i = 0; i < vaultList.length; i++) {
+            if (vaultList[i] == vault) {
+                vaultList[i] = vaultList[vaultList.length - 1];
+                vaultList.pop();
+                break;
+            }
+        }
+        
+        emit VaultRemoved(vault);
+    }
+
+    function setAdmin(address newAdmin) external onlyAdmin {
+        if (newAdmin == address(0)) revert ZeroAddress();
+        if (newAdmin == admin) revert ZeroAddress();
+        
+        address oldAdmin = admin;
+        admin = newAdmin;
+        
+        emit AdminUpdated(oldAdmin, newAdmin);
+    }
+
+    function setOracle(address newOracle) external onlyAdmin {
+        if (newOracle == address(0)) revert ZeroAddress();
+        
+        address oldOracle = address(oracle);
+        oracle = IPriceOracle(newOracle);
+        
+        emit OracleUpdated(oldOracle, newOracle);
+    }
+
+    function pause() external onlyAdmin {
+        _pause();
+    }
+
+    function unpause() external onlyAdmin {
+        _unpause();
+    }
+
+    function rescueTokens(address token, address to) external onlyAdmin validToken(token) {
+        if (to == address(0)) revert ZeroAddress();
+        
+        uint256 balance = IERC20(token).balanceOf(address(this));
+        if (balance == 0) revert NothingToRescue();
+        
+        IERC20(token).safeTransfer(to, balance);
+        
+        emit TokensRescued(token, to, balance);
+    }
+
+    function rescueETH(address payable to) external onlyAdmin {
+        if (to == address(0)) revert ZeroAddress();
+        
+        uint256 balance = address(this).balance;
+        if (balance == 0) revert NothingToRescue();
+        
+        (bool success, ) = to.call{value: balance}("");
+        if (!success) revert ETHTransferFailed();
+        
+        emit ETHRescued(to, balance);
     }
 
     receive() external payable {}

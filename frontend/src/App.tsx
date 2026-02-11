@@ -18,7 +18,7 @@ function Header() {
       }}
     >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center h-16">
+        <div className="flex items-center justify-between h-16 relative">
           {/* Logo */}
           <Link to="/" className="flex items-center space-x-2 flex-shrink-0">
             <div className="relative w-8 h-8">
@@ -32,38 +32,35 @@ function Header() {
             </span>
           </Link>
           
-          {/* Nav - Centered */}
-          <div className="flex-1 flex justify-center">
-            <div 
-              className="hidden md:flex items-center space-x-1 p-1 rounded-xl border"
+          {/* Nav - Absolute Centered */}
+          <div className="hidden md:flex items-center space-x-1 p-1 rounded-xl border absolute left-1/2 transform -translate-x-1/2"
+            style={{
+              backgroundColor: isDark ? '#3d2e20' : '#f3f4f6',
+              borderColor: isDark ? '#3d2e20' : '#e5e7eb'
+            }}
+          >
+            <Link 
+              to="/" 
+              className="px-5 py-1.5 rounded-lg text-sm font-semibold transition-all"
               style={{
-                backgroundColor: isDark ? '#3d2e20' : '#f3f4f6',
-                borderColor: isDark ? '#3d2e20' : '#e5e7eb'
+                backgroundColor: location.pathname === '/' ? (isDark ? '#2c2117' : '#ffffff') : 'transparent',
+                color: location.pathname === '/' ? '#F2541B' : (isDark ? '#9ca3af' : '#6b7280'),
+                boxShadow: location.pathname === '/' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'
               }}
             >
-              <Link 
-                to="/" 
-                className="px-5 py-1.5 rounded-lg text-sm font-semibold transition-all"
-                style={{
-                  backgroundColor: location.pathname === '/' ? (isDark ? '#2c2117' : '#ffffff') : 'transparent',
-                  color: location.pathname === '/' ? '#F2541B' : (isDark ? '#9ca3af' : '#6b7280'),
-                  boxShadow: location.pathname === '/' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'
-                }}
-              >
-                Swap
-              </Link>
-              <Link 
-                to="/vaults" 
-                className="px-5 py-1.5 rounded-lg text-sm font-semibold transition-all"
-                style={{
-                  backgroundColor: location.pathname === '/vaults' ? (isDark ? '#2c2117' : '#ffffff') : 'transparent',
-                  color: location.pathname === '/vaults' ? '#F2541B' : (isDark ? '#9ca3af' : '#6b7280'),
-                  boxShadow: location.pathname === '/vaults' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'
-                }}
-              >
-                Vaults
-              </Link>
-            </div>
+              Swap
+            </Link>
+            <Link 
+              to="/vaults" 
+              className="px-5 py-1.5 rounded-lg text-sm font-semibold transition-all"
+              style={{
+                backgroundColor: location.pathname === '/vaults' ? (isDark ? '#2c2117' : '#ffffff') : 'transparent',
+                color: location.pathname === '/vaults' ? '#F2541B' : (isDark ? '#9ca3af' : '#6b7280'),
+                boxShadow: location.pathname === '/vaults' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'
+              }}
+            >
+              Vaults
+            </Link>
           </div>
           
           {/* Right Side */}

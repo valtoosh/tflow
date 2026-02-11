@@ -7,27 +7,27 @@ import '@rainbow-me/rainbowkit/styles.css'
 import App from './App'
 import './index.css'
 import { config } from './utils/wagmi'
-import { useTheme } from './hooks/useTheme'
+import { ThemeProvider, useTheme } from './hooks/useTheme'
 
 const queryClient = new QueryClient()
 
 // RainbowKit theme wrapper that syncs with our theme
 function RainbowKitThemeWrapper({ children }: { children: React.ReactNode }) {
   const { isDark } = useTheme()
-  
+
   return (
-    <RainbowKitProvider 
-      theme={isDark 
+    <RainbowKitProvider
+      theme={isDark
         ? darkTheme({
-            accentColor: '#F2541B',
-            accentColorForeground: '#fff',
-            borderRadius: 'medium',
-          })
+          accentColor: '#F2541B',
+          accentColorForeground: '#fff',
+          borderRadius: 'medium',
+        })
         : lightTheme({
-            accentColor: '#F2541B',
-            accentColorForeground: '#fff',
-            borderRadius: 'medium',
-          })
+          accentColor: '#F2541B',
+          accentColorForeground: '#fff',
+          borderRadius: 'medium',
+        })
       }
     >
       {children}
@@ -37,12 +37,14 @@ function RainbowKitThemeWrapper({ children }: { children: React.ReactNode }) {
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <WagmiProvider config={config}>
-      <QueryClientProvider client={queryClient}>
-        <RainbowKitThemeWrapper>
-          <App />
-        </RainbowKitThemeWrapper>
-      </QueryClientProvider>
-    </WagmiProvider>
+    <ThemeProvider>
+      <WagmiProvider config={config}>
+        <QueryClientProvider client={queryClient}>
+          <RainbowKitThemeWrapper>
+            <App />
+          </RainbowKitThemeWrapper>
+        </QueryClientProvider>
+      </WagmiProvider>
+    </ThemeProvider>
   </React.StrictMode>,
 )
