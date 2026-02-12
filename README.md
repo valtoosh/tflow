@@ -44,7 +44,7 @@ TigerFlow aggregates RobinPump bonding curves, merchant WETH vaults, and Uniswap
 
 ## 🎬 Technical Walkthrough Video
 
-[![Code Walkthrough](https://img.shields.io/badge/Loom-Watch%20Walkthrough-00DDB3?style=for-the-badge&logo=loom)](https://www.loom.com/share/YOUR_LOOM_ID)
+[![Code Walkthrough](https://img.shields.io/badge/Loom-Watch%20Walkthrough-00DDB3?style=for-the-badge&logo=loom)](https://www.loom.com/share/01d83e12ed174a9dabdc0a16e07c1b5c)
 
 **What's covered:**
 - Project architecture and repo structure
@@ -52,8 +52,6 @@ TigerFlow aggregates RobinPump bonding curves, merchant WETH vaults, and Uniswap
 - Frontend implementation (React + Wagmi + RainbowKit)
 - Demo mode vs live blockchain interaction
 - How we satisfied hackathon requirements
-
-> **Note**: Upload your Loom video and replace `YOUR_LOOM_ID` with the actual share ID
 
 ---
 
@@ -113,7 +111,7 @@ TigerFlowRouterV2 (0x49ca...bC10)
 
 ## 📊 Canva Presentation
 
-**👉 [View Presentation on Canva](https://www.canva.com/design/YOUR_DESIGN_ID)**
+**👉 [View Presentation on Canva](https://www.canva.com/design/DAHBCMqjqg0/C5ucVnxzUhzB414TNjJFQg/edit)**
 
 **Slides include:**
 1. Team Introduction
@@ -122,8 +120,6 @@ TigerFlowRouterV2 (0x49ca...bC10)
 4. Technology Stack (Base + RobinPump + Vaults)
 5. Demo Screenshots
 6. Future Roadmap
-
-> **Note**: Create your Canva presentation and replace `YOUR_DESIGN_ID` with the actual design ID
 
 ---
 
